@@ -186,6 +186,14 @@ const SEED_REVIEW = [
   { id:2, postId:4, postTitle:"What 18 months watching founders taught me", dueDate:"2025-06-26", status:"ready", platform:"LinkedIn", docViews:19, calls:1, impressions:3100, format:"Observation + Principle", theme:"Delegation Ladder", testGroup:"B", aiProposal:null },
 ];
 
+const SEED_BESTPRACTICE = [
+  { id:1, platform:"LinkedIn", category:"hook", title:"The Specific Failure Hook", pattern:"Open with a named, concrete failure the reader has already lived. No setup. No 'most people'. Just the exact moment they recognise.", example:"Your business grew because you were good at the work.\n\nNow you're trapped in the work because you're too good at it.", whyItWorks:"Specific failure creates instant recognition. The reader feels seen before you've sold anything. Stops the scroll because it sounds like their internal monologue.", source:"manual", addedDate:"2025-06-01" },
+  { id:2, platform:"LinkedIn", category:"format", title:"One Idea Per Line, No Bullet Lists", pattern:"Each sentence stands alone on its own line. No bullet points, no numbered lists. Prose only. Maximum 2 sentences per paragraph block. Short paragraphs separated by a blank line.", example:"The fix isn't working harder. It's not another system.\n\nIt's a GM.", whyItWorks:"Short lines create white space that forces the reader to pause. Each line lands like a punctuation mark. Bullets signal 'content'. Prose signals 'person'.", source:"manual", addedDate:"2025-06-01" },
+  { id:3, platform:"Both", category:"theme", title:"Proprietary Problem Naming", pattern:"Name the invisible constraint the owner is living inside. Give it a proper noun (The Founder Trap, The $5M Ceiling). Describe why it feels like success even as it limits them.", example:"I call it the Founder Trap.\n\nYou built the thing. You ARE the thing.", whyItWorks:"Naming a problem the reader hadn't articulated creates the feeling that you understand them better than they understand themselves. Proprietary names are memorable and shareable.", source:"manual", addedDate:"2025-06-02" },
+  { id:4, platform:"LinkedIn", category:"engagement", title:"The Earned Contrarian Close", pattern:"End with a 1–2 line conclusion that contradicts the expected advice. The close must be earned by the logic of the post — not dropped in. No question. No CTA. Just the principle.", example:"The discomfort is the point. Lean into it.", whyItWorks:"Contrarian closes trigger comments from people who agree and disagree equally. Both camps share the post. The lack of a question makes it feel like a conviction, not a prompt.", source:"manual", addedDate:"2025-06-03" },
+  { id:5, platform:"Instagram", category:"format", title:"Framework-as-Visual Prompt", pattern:"Name a framework in the first line. Give it a number (rungs, steps, phases). Describe each level in one sentence. End with where the reader is stuck right now.", example:"Draw your org chart.\n\nNow put your name everywhere it appears.\n\nThat's the problem.", whyItWorks:"Numbered frameworks are saved and shared because they feel like tools, not opinions. Instagram audiences respond to visual structure even in plain text. The final diagnosis triggers saves.", source:"manual", addedDate:"2025-06-04" },
+];
+
 // ─── AI ───────────────────────────────────────────────────────────────────────
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 
@@ -220,9 +228,23 @@ function fmtCtx(formats) {
   return p.length ? "PROVEN FORMATS: "+p.map(f=>`${f.name}: ${f.description}`).join(" | ") : "";
 }
 
-async function genPosts(raw, theme, fmt, mind, formats) {
+function bpCtx(bp) {
+  if(!bp||bp.length===0) return "";
+  const hooks=bp.filter(b=>b.category==="hook");
+  const fmts=bp.filter(b=>b.category==="format");
+  const themes=bp.filter(b=>b.category==="theme");
+  const eng=bp.filter(b=>b.category==="engagement");
+  const parts=[];
+  if(hooks.length) parts.push("BEST PRACTICE HOOKS: "+hooks.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  if(fmts.length) parts.push("BEST PRACTICE FORMATS: "+fmts.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  if(themes.length) parts.push("BEST PRACTICE THEMES: "+themes.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  if(eng.length) parts.push("BEST PRACTICE ENGAGEMENT: "+eng.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  return parts.length?"INTERNET BEST PRACTICES (use to inform structure/hooks, always filtered through Stephen's voice):\n"+parts.join("\n"):"";
+}
+
+async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[]) {
   const raw2 = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
     `Raw input:\n${raw}\n\nTheme: ${theme}\nFormat: ${fmt||"best fit"}`
   );
   return JSON.parse(raw2);
@@ -250,6 +272,24 @@ async function genReport(posts, formats, mind) {
     `Posts: ${JSON.stringify(posts.map(p=>({title:p.title,theme:p.theme,format:p.format,platform:p.platform,impressions:p.impressions,docViews:p.docViews,calls:p.calls})))}\nFormats: ${JSON.stringify(formats)}`
   );
   return JSON.parse(raw);
+}
+
+async function researchBestPractices(platform, mind) {
+  const raw = await callClaude(
+    `You are a content strategy researcher specialising in the SME/business coaching niche on social media. You know what patterns drive engagement, saves, and conversions for coaches targeting $1M–$5M business owners.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"patterns":[{"title":"...","category":"hook|format|theme|engagement","platform":"LinkedIn|Instagram|Both","pattern":"the reusable structural technique","example":"brief example","whyItWorks":"why this converts for SME owners"}]} — return exactly 5 patterns.`,
+    `Research the most effective content patterns for ${platform} in the SME business coaching and delegation/GM install niche. Focus on what drives saves, link clicks, and booked calls from business owners doing $1M–$5M revenue.`
+  );
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed : (parsed.patterns || []);
+}
+
+async function extractPattern(postText, mind) {
+  const raw = await callClaude(
+    `You are a content pattern analyst. Given a real social media post, extract the reusable structural and rhetorical pattern — not the topic, but the technique.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"patterns":[{"title":"...","category":"hook|format|theme|engagement","platform":"LinkedIn|Instagram|Both","pattern":"the reusable pattern described generically","example":"brief example in Stephen's voice","whyItWorks":"the psychological reason this converts"}]}`,
+    `Extract the reusable content pattern from this post:\n\n${postText}`
+  );
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed : (parsed.patterns || []);
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -533,7 +573,7 @@ function ReviewQueue({ posts, setPosts, formats, setFormats, reviewQueue, setRev
   );
 }
 
-function ContentEngine({ assets, posts, setPosts, formats, mind, setPage }) {
+function ContentEngine({ assets, posts, setPosts, formats, mind, setPage, engineState, setEngineState, bestPractice=[] }) {
   const [step,setStep] = useState(0);
   const [raw,setRaw] = useState(""); const [theme,setTheme] = useState("Delegation Ladder"); const [fmt,setFmt] = useState("");
   const [loading,setLoading] = useState(false); const [err,setErr] = useState(""); const [result,setResult] = useState(null);
@@ -543,7 +583,7 @@ function ContentEngine({ assets, posts, setPosts, formats, mind, setPage }) {
   const generate = async () => {
     if(!raw.trim()) return;
     setLoading(true); setErr(""); setStep(1);
-    try { const r=await genPosts(raw,theme,fmt,mind,formats); setResult(r); setStep(2); }
+    try { const r=await genPosts(raw,theme,fmt,mind,formats,bestPractice); setResult(r); setStep(2); }
     catch(e){setErr("Generation failed: "+e.message);setStep(0);}
     finally{setLoading(false);}
   };
@@ -934,6 +974,190 @@ function ContentLibrary({ assets, setAssets }) {
   );
 }
 
+function BestPracticeBank({ bestPractice, setBestPractice, mind }) {
+  const [platTab,setPlatTab] = useState("All");
+  const [catFilter,setCatFilter] = useState("all");
+  const [resPlat,setResPlat] = useState("LinkedIn");
+  const [resLoading,setResLoading] = useState(false);
+  const [extractText,setExtractText] = useState("");
+  const [extractLoading,setExtractLoading] = useState(false);
+  const [extractPreview,setExtractPreview] = useState(null);
+  const [err,setErr] = useState("");
+  const [manualForm,setManualForm] = useState({platform:"LinkedIn",category:"hook",title:"",pattern:"",example:"",whyItWorks:"",source:"manual"});
+  const [savedManual,setSavedManual] = useState(false);
+  const [showExtract,setShowExtract] = useState(false);
+  const [showManual,setShowManual] = useState(false);
+
+  const CATS=["all","hook","format","theme","engagement"];
+  const PLATS=["All","LinkedIn","Instagram","Both"];
+  const catCol={hook:"tr",format:"tb",theme:"tg",engagement:"tv"};
+  const platCol={LinkedIn:"tb",Instagram:"tv",Both:"tg"};
+
+  const visible = bestPractice
+    .filter(b=>platTab==="All"||b.platform===platTab||b.platform==="Both")
+    .filter(b=>catFilter==="all"||b.category===catFilter);
+
+  const doResearch = async () => {
+    setResLoading(true); setErr("");
+    try {
+      const results = await researchBestPractices(resPlat, mind);
+      const entries=(Array.isArray(results)?results:results.patterns||[]).map((p,i)=>({...p,id:Date.now()+i,source:"ai-research",addedDate:new Date().toISOString().slice(0,10)}));
+      setBestPractice(prev=>[...prev,...entries]);
+    } catch(e){setErr("Research failed: "+e.message);}
+    finally{setResLoading(false);}
+  };
+
+  const doExtract = async () => {
+    if(!extractText.trim()) return;
+    setExtractLoading(true); setErr(""); setExtractPreview(null);
+    try {
+      const results = await extractPattern(extractText, mind);
+      setExtractPreview(Array.isArray(results)?results:results.patterns||[]);
+    } catch(e){setErr("Extraction failed: "+e.message);}
+    finally{setExtractLoading(false);}
+  };
+
+  const saveExtracted = () => {
+    if(!extractPreview) return;
+    const entries=extractPreview.map((p,i)=>({...p,id:Date.now()+i,source:"ai-extract",addedDate:new Date().toISOString().slice(0,10)}));
+    setBestPractice(prev=>[...prev,...entries]);
+    setExtractPreview(null); setExtractText(""); setShowExtract(false);
+  };
+
+  const saveManual = () => {
+    if(!manualForm.title||!manualForm.pattern) return;
+    setBestPractice(prev=>[...prev,{...manualForm,id:Date.now(),addedDate:new Date().toISOString().slice(0,10)}]);
+    setManualForm({platform:"LinkedIn",category:"hook",title:"",pattern:"",example:"",whyItWorks:"",source:"manual"});
+    setSavedManual(true); setTimeout(()=>setSavedManual(false),1800);
+  };
+
+  const remove = id => setBestPractice(prev=>prev.filter(b=>b.id!==id));
+
+  return (
+    <div>
+      <div className="alert av mb20"><strong>Best Practice Knowledge Bank</strong> — patterns from what's working across LinkedIn and Instagram in your niche. Injected into every Content Engine generation call alongside Your Mind Bank and What Works Bank.</div>
+      {err&&<div className="alert ar mb16">{err}</div>}
+
+      <div className="g2 mb16">
+        <div className="card">
+          <div className="ct">🔬 AI Research</div>
+          <div className="fg"><label className="lbl">Platform to research</label>
+            <select className="sel" value={resPlat} onChange={e=>setResPlat(e.target.value)}>
+              {["LinkedIn","Instagram","Both"].map(p=><option key={p}>{p}</option>)}
+            </select>
+          </div>
+          <button className="btn bp w100" onClick={doResearch} disabled={resLoading}>
+            {resLoading?<><span className="spin"/> Researching...</>:"Research Best Practices →"}
+          </button>
+          <div className="xs muted mt8">Claude analyses what content patterns drive engagement and conversions in the SME business coaching niche for this platform.</div>
+        </div>
+
+        <div className="card">
+          <div className="ct">🧬 Extract from Post <button className="btn bgh bsm mla" onClick={()=>setShowExtract(s=>!s)}>{showExtract?"Hide ↑":"Paste a post ↓"}</button></div>
+          {!showExtract&&<div className="xs muted">Found a high-performing post? Paste it here and Claude extracts the reusable pattern.</div>}
+          {showExtract&&(
+            <>
+              <div className="fg"><label className="lbl">Paste a post</label>
+                <textarea className="ta" style={{minHeight:110}} placeholder="Paste any LinkedIn or Instagram post here..." value={extractText} onChange={e=>setExtractText(e.target.value)}/>
+              </div>
+              <button className="btn bv bsm w100" onClick={doExtract} disabled={extractLoading||!extractText.trim()}>
+                {extractLoading?<><span className="spin"/> Extracting...</>:"Extract Pattern →"}
+              </button>
+              {extractPreview&&extractPreview.length>0&&(
+                <div className="rp mt12">
+                  <div className="xs muted mb8">Extracted {extractPreview.length} pattern{extractPreview.length!==1?"s":""} — preview:</div>
+                  {extractPreview.map((p,i)=>(
+                    <div key={i} className="kbi mb8">
+                      <div className="kbih"><div className="kbit">{p.title}</div><span className={`tag ${catCol[p.category]||"ti"}`}>{p.category}</span></div>
+                      <div className="kbib">{p.pattern}</div>
+                    </div>
+                  ))}
+                  <div className="f g8 mt8">
+                    <button className="btn bsa bsm" onClick={saveExtracted}>Save to Bank →</button>
+                    <button className="btn bo bsm" onClick={()=>setExtractPreview(null)}>Discard</button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="f fac fjb mb12" style={{flexWrap:"wrap",gap:8}}>
+        <div className="f" style={{gap:0,flexWrap:"wrap"}}>
+          <div className="tabs" style={{marginBottom:0,borderBottom:"none"}}>
+            {PLATS.map(p=><div key={p} className={`tab ${platTab===p?"active":""}`} onClick={()=>setPlatTab(p)}>{p}{p==="All"?` (${bestPractice.length})`:""}</div>)}
+          </div>
+          <div className="tabs" style={{marginBottom:0,borderBottom:"none",borderLeft:"1px solid var(--border)",marginLeft:8,paddingLeft:8}}>
+            {CATS.map(c=><div key={c} className={`tab ${catFilter===c?"active":""}`} onClick={()=>setCatFilter(c)}>{c}</div>)}
+          </div>
+        </div>
+        <button className="btn bo bsm" onClick={()=>setShowManual(s=>!s)}>+ Add Manually</button>
+      </div>
+
+      {showManual&&(
+        <div className="card mb16">
+          <div className="ct">✍️ Manual Entry</div>
+          <div className="g2">
+            <div>
+              <div className="fg"><label className="lbl">Platform</label>
+                <select className="sel" value={manualForm.platform} onChange={e=>setManualForm(f=>({...f,platform:e.target.value}))}>
+                  {["LinkedIn","Instagram","Both"].map(p=><option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div className="fg"><label className="lbl">Category</label>
+                <select className="sel" value={manualForm.category} onChange={e=>setManualForm(f=>({...f,category:e.target.value}))}>
+                  {["hook","format","theme","engagement"].map(c=><option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="fg"><label className="lbl">Title</label>
+                <input className="inp" placeholder="Name this pattern..." value={manualForm.title} onChange={e=>setManualForm(f=>({...f,title:e.target.value}))}/>
+              </div>
+            </div>
+            <div>
+              <div className="fg"><label className="lbl">Pattern (the reusable technique)</label>
+                <textarea className="ta" style={{minHeight:80}} placeholder="Describe the structural pattern..." value={manualForm.pattern} onChange={e=>setManualForm(f=>({...f,pattern:e.target.value}))}/>
+              </div>
+              <div className="fg"><label className="lbl">Why it works</label>
+                <input className="inp" placeholder="The psychological reason this converts..." value={manualForm.whyItWorks} onChange={e=>setManualForm(f=>({...f,whyItWorks:e.target.value}))}/>
+              </div>
+              <div className="fg"><label className="lbl">Example (optional)</label>
+                <textarea className="ta" style={{minHeight:60}} placeholder="Quick example in Stephen's voice..." value={manualForm.example} onChange={e=>setManualForm(f=>({...f,example:e.target.value}))}/>
+              </div>
+            </div>
+          </div>
+          <button className={`btn w100 ${savedManual?"bsa":"bp"}`} onClick={saveManual}>{savedManual?"✓ Saved to Bank":"Add to Bank →"}</button>
+        </div>
+      )}
+
+      <div style={{borderTop:"1px solid var(--border)",paddingTop:18}}>
+        {visible.length===0&&<div className="es card"><div className="esi">🌐</div><p>No patterns yet. Click "Research Best Practices" to pull what's working across the internet, or add manually.</p></div>}
+        {visible.map(b=>(
+          <div key={b.id} className="kbi">
+            <div className="kbih">
+              <div style={{flex:1}}>
+                <div className="f fac g8 mb6">
+                  <span className={`tag ${platCol[b.platform]||"ti"}`}>{b.platform}</span>
+                  <span className={`tag ${catCol[b.category]||"ti"}`}>{b.category}</span>
+                  <span className="kbit">{b.title}</span>
+                </div>
+                <div className="kbib">{b.pattern}</div>
+                {b.whyItWorks&&<div className="xs muted mt6">→ {b.whyItWorks}</div>}
+                {b.example&&<div className="xs muted mt4" style={{fontStyle:"italic",whiteSpace:"pre-wrap"}}>"{b.example}"</div>}
+              </div>
+              <button className="btn bgh bsm" style={{color:"var(--rust)",alignSelf:"flex-start",flexShrink:0}} onClick={()=>remove(b.id)}>Remove</button>
+            </div>
+            <div className="kbif">
+              <span className="tag ti">{b.source==="ai-research"?"AI research":b.source==="ai-extract"?"AI extract":"manual"}</span>
+              <span className="xs muted">· {b.addedDate}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── SHELL ────────────────────────────────────────────────────────────────────
 const NAV = [
   {sec:"Core Loop"},
@@ -947,11 +1171,12 @@ const NAV = [
   {sec:"Knowledge Banks"},
   {id:"mind",label:"Your Mind",icon:"🧠"},
   {id:"whatworks",label:"What Works",icon:"✦"},
+  {id:"bestpractice",label:"Best Practices",icon:"🌐"},
   {sec:"Library"},
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
 
-const TITLES = {dashboard:"Dashboard",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Performance Tracking",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",input:"Content Library"};
+const TITLES = {dashboard:"Dashboard",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Performance Tracking",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
 
 export default function App() {
   const [page,setPage] = useState("dashboard");
@@ -963,6 +1188,7 @@ export default function App() {
   const [mind,setMind] = useState(SEED_MIND);
   const [formats,setFormats] = useState(SEED_FORMATS);
   const [reviewQueue,setReviewQueue] = useState(SEED_REVIEW);
+  const [bestPractice,setBestPractice] = useState(SEED_BESTPRACTICE);
 const [engineState,setEngineState] = useState({});
   const pending = reviewQueue.filter(r=>r.status==="ready").length;
   return (
@@ -992,13 +1218,14 @@ const [engineState,setEngineState] = useState({});
           </div>
           <div className="pg">
             {page==="dashboard"&&<Dashboard posts={posts} formats={formats} reviewQueue={reviewQueue} setPage={setPage}/>}
-            {page==="engine"&&<ContentEngine assets={assets} posts={posts} setPosts={setPosts} formats={formats} mind={mind} setPage={setPage} engineState={engineState} setEngineState={setEngineState}/>}
+            {page==="engine"&&<ContentEngine assets={assets} posts={posts} setPosts={setPosts} formats={formats} mind={mind} setPage={setPage} engineState={engineState} setEngineState={setEngineState} bestPractice={bestPractice}/>}
             {page==="publish"&&<Publishing posts={posts} setPosts={setPosts} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
             {page==="mind"&&<MyMind mind={mind} setMind={setMind}/>}
             {page==="whatworks"&&<WhatWorksBank formats={formats} setFormats={setFormats} mind={mind}/>}
+            {page==="bestpractice"&&<BestPracticeBank bestPractice={bestPractice} setBestPractice={setBestPractice} mind={mind}/>}
             {page==="input"&&<ContentLibrary assets={assets} setAssets={setAssets}/>}
           </div>
         </main>
