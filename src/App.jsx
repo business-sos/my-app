@@ -274,6 +274,14 @@ async function genReport(posts, formats, mind) {
   return JSON.parse(raw);
 }
 
+async function analyzeAnalyticsImport(posts, mind, formats, bestPractice) {
+  const raw = await callClaude(
+    `You are the BGB Content Intelligence agent. Analyse LinkedIn post performance data from the last 7 days. Compare each post's hook, structure, and post type against the knowledge banks.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY valid JSON: {"summary":{"keyInsight":"...","topPattern":"...","weakestArea":"..."},"postAnalyses":[{"id":1,"hook":"...","hookScore":0-100,"postType":"text|image|video|document|carousel","matchedPattern":"pattern name or null","verdict":"strong|average|weak","whyWorked":"2 sentences","recommendation":"1 sentence"}],"newPattern":{"title":"...","category":"hook|format|theme|engagement","pattern":"...","whyItWorks":"..."} or null,"recommendations":["...","..."]}`,
+    `Analyse these ${posts.length} LinkedIn posts from the last 7 days. Impressions/reactions/comments are LinkedIn native metrics (not doc views):\n${JSON.stringify(posts.map(p=>({id:p.id,hook:p.hook,postType:p.postType,impressions:p.impressions,reactions:p.reactions,comments:p.comments,reposts:p.reposts,clicks:p.clicks,text:p.text?.slice(0,300)})))}`
+  );
+  return JSON.parse(raw);
+}
+
 async function researchBestPractices(platform, mind) {
   const raw = await callClaude(
     `You are a content strategy researcher specialising in the SME/business coaching niche on social media. You know what patterns drive engagement, saves, and conversions for coaches targeting $1M–$5M business owners.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"patterns":[{"title":"...","category":"hook|format|theme|engagement","platform":"LinkedIn|Instagram|Both","pattern":"the reusable structural technique","example":"brief example","whyItWorks":"why this converts for SME owners"}]} — return exactly 5 patterns.`,
@@ -974,6 +982,155 @@ function ContentLibrary({ assets, setAssets }) {
   );
 }
 
+function AnalyticsImport({ data, setData, mind, formats, bestPractice, setBestPractice, posts, setPosts, setPage }) {
+  const [analysis,setAnalysis] = useState(null);
+  const [loading,setLoading] = useState(false);
+  const [err,setErr] = useState("");
+  const [patternSaved,setPatternSaved] = useState(false);
+  const [metricsSaved,setMetricsSaved] = useState(false);
+
+  const runAnalysis = async () => {
+    if(!data?.posts?.length) return;
+    setLoading(true); setErr("");
+    try { setAnalysis(await analyzeAnalyticsImport(data.posts,mind,formats,bestPractice)); }
+    catch(e){setErr("Analysis failed: "+e.message);}
+    finally{setLoading(false);}
+  };
+
+  const addPattern = () => {
+    if(!analysis?.newPattern) return;
+    setBestPractice(prev=>[...prev,{...analysis.newPattern,id:Date.now(),platform:"LinkedIn",source:"analytics-import",addedDate:new Date().toISOString().slice(0,10)}]);
+    setPatternSaved(true); setTimeout(()=>setPatternSaved(false),2000);
+  };
+
+  const importMetrics = () => {
+    if(!data?.posts?.length) return;
+    let matchCount=0;
+    const updated=posts.map(post=>{
+      const matchedScraped=data.posts.find(sp=>{
+        const spHook=(sp.hook||"").toLowerCase().slice(0,30);
+        const pTitle=(post.title||"").toLowerCase();
+        const pContent=(post.content||"").split("\n")[0].toLowerCase();
+        return spHook.length>5&&(pTitle.includes(spHook.slice(0,20))||pContent.includes(spHook.slice(0,20)));
+      });
+      if(matchedScraped){matchCount++;return{...post,impressions:matchedScraped.impressions||post.impressions,engagement:(matchedScraped.reactions||0)+(matchedScraped.comments||0)+(matchedScraped.reposts||0)};}
+      return post;
+    });
+    setPosts(updated);
+    setMetricsSaved(true); setTimeout(()=>setMetricsSaved(false),2500);
+  };
+
+  const verdictCol={strong:"ts",average:"tg",weak:"tr"};
+  const typeCol={video:"tv",image:"tb",document:"tprov",carousel:"tg",text:"ti"};
+
+  if(!data){
+    return(
+      <div>
+        <div className="card" style={{textAlign:"center",padding:56}}>
+          <div style={{fontSize:40,marginBottom:14}}>📥</div>
+          <div className="serif" style={{fontSize:18,marginBottom:8}}>No import pending</div>
+          <div className="muted sm mb20">Install the BGB Chrome extension, open it, and click "Pull LinkedIn Analytics".</div>
+          <div className="alert ag" style={{textAlign:"left",maxWidth:420,margin:"0 auto"}}>
+            <strong>How to install the extension:</strong><br/>
+            1. Open Chrome → go to <code>chrome://extensions</code><br/>
+            2. Enable <strong>Developer mode</strong> (top right)<br/>
+            3. Click <strong>Load unpacked</strong><br/>
+            4. Select the <code>extension/</code> folder from this project<br/>
+            5. The BGB icon will appear in your toolbar
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const importedPosts=data.posts||[];
+  const totalImp=data.summary?.totalImpressions||importedPosts.reduce((s,p)=>s+(p.impressions||0),0);
+  const topPost=[...importedPosts].sort((a,b)=>(b.impressions||0)-(a.impressions||0))[0];
+  const when=data.scrapedAt?new Date(data.scrapedAt).toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
+
+  return(
+    <div>
+      <div className="g4 mb20">
+        <div className="sc gold"><div className="sl">Posts Scraped</div><div className="sv">{importedPosts.length}</div><div className="ss">last 7 days · LinkedIn</div></div>
+        <div className="sc ink"><div className="sl">Total Impressions</div><div className="sv">{totalImp>=1000?(totalImp/1000).toFixed(1)+"K":totalImp}</div></div>
+        <div className="sc sage"><div className="sl">Top Hook</div><div style={{fontSize:11,marginTop:4,fontWeight:500,lineHeight:1.4}}>{topPost?.hook?.slice(0,60)||"—"}</div></div>
+        <div className="sc violet"><div className="sl">Scraped</div><div style={{fontSize:11,marginTop:4,fontFamily:"DM Mono,monospace",color:"var(--ink60)"}}>{when}</div></div>
+      </div>
+
+      {err&&<div className="alert ar mb16">{err}</div>}
+
+      <div className="card mb16">
+        <div className="ct">🧠 Agent Analysis — All 3 Knowledge Banks</div>
+        <div className="f fac g12 fw">
+          <button className="btn bp" onClick={runAnalysis} disabled={loading}>
+            {loading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}
+          </button>
+          <button className={`btn bsm ${metricsSaved?"bsa":"bo"}`} onClick={importMetrics}>
+            {metricsSaved?"✓ Metrics Updated":"Import Metrics to Tracking"}
+          </button>
+          {analysis?.newPattern&&(
+            <button className={`btn bsm ${patternSaved?"bsa":"bv"}`} onClick={addPattern}>
+              {patternSaved?"✓ Pattern Saved":"+ Add to Best Practice KB"}
+            </button>
+          )}
+          <button className="btn bo bsm mla" onClick={()=>{setData(null);setAnalysis(null);setPage("dashboard");}}>Clear Import</button>
+        </div>
+      </div>
+
+      {analysis&&(
+        <>
+          <div className="card mb16">
+            <div className="ct">📊 Intelligence Report</div>
+            <div className="g3 mb12">
+              <div><div className="xs muted mb4">Key Insight</div><div className="sm">{analysis.summary?.keyInsight}</div></div>
+              <div><div className="xs muted mb4">Top Pattern</div><div className="sm">{analysis.summary?.topPattern}</div></div>
+              <div><div className="xs muted mb4">Weakest Area</div><div className="sm">{analysis.summary?.weakestArea}</div></div>
+            </div>
+            {analysis.recommendations?.length>0&&<div className="div">{analysis.recommendations.map((r,i)=><div key={i} className="f g8 mb6 mt8"><span style={{color:"var(--gold)",fontWeight:700}}>→</span><span className="sm">{r}</span></div>)}</div>}
+            {analysis.newPattern&&<div className="alert av mt12"><strong>New pattern detected:</strong> "{analysis.newPattern.title}" — {analysis.newPattern.pattern}</div>}
+          </div>
+        </>
+      )}
+
+      <div className="card">
+        <div className="ct">📋 Scraped Posts ({importedPosts.length})</div>
+        {importedPosts.map((post,i)=>{
+          const pa=analysis?.postAnalyses?.find(a=>a.id===post.id);
+          return(
+            <div key={post.id||i} className="li">
+              <div className="libody">
+                <div className="f fac g8 mb6">
+                  <span className={`tag ${typeCol[post.postType]||"ti"}`}>{post.postType||"text"}</span>
+                  {pa&&<span className={`tag ${verdictCol[pa.verdict]||"ti"}`}>{pa.verdict}</span>}
+                  {pa?.matchedPattern&&<span className="tag tprov">↔ {pa.matchedPattern}</span>}
+                  {pa?.hookScore!=null&&<span className="xs muted">Hook {pa.hookScore}/100</span>}
+                </div>
+                <div className="lititle">{post.hook||"(no hook extracted)"}</div>
+                {post.text&&post.text!==post.hook&&<div className="liprev">{post.text}</div>}
+                <div className="limetrics mt6">
+                  <span className="mp"><strong>{(post.impressions||0).toLocaleString()}</strong> imp</span>
+                  <span className="mp"><strong>{post.reactions||0}</strong> reactions</span>
+                  <span className="mp"><strong>{post.comments||0}</strong> comments</span>
+                  <span className="mp"><strong>{post.reposts||0}</strong> reposts</span>
+                  {post.clicks>0&&<span className="mp hl"><strong>{post.clicks}</strong> clicks</span>}
+                  {post.engagementRate&&<span className="mp"><strong>{post.engagementRate}%</strong> eng</span>}
+                </div>
+                {pa&&(
+                  <div className="rp mt8">
+                    <div className="sm mb4">{pa.whyWorked}</div>
+                    <div className="xs" style={{color:"var(--violet)"}}>→ {pa.recommendation}</div>
+                  </div>
+                )}
+                {post.url&&<div className="mt8"><a href={post.url} target="_blank" rel="noreferrer" className="btn bo bsm">View post ↗</a></div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function BestPracticeBank({ bestPractice, setBestPractice, mind }) {
   const [platTab,setPlatTab] = useState("All");
   const [catFilter,setCatFilter] = useState("all");
@@ -1166,6 +1323,7 @@ const NAV = [
   {id:"publish",label:"Publishing",icon:"↑"},
   {id:"tracking",label:"Tracking",icon:"◉"},
   {sec:"Intelligence"},
+  {id:"analytics",label:"Analytics Import",icon:"📥",badge:"analytics"},
   {id:"review",label:"Review Queue",icon:"◐",badge:"review"},
   {id:"report",label:"Weekly Report",icon:"📊"},
   {sec:"Knowledge Banks"},
@@ -1176,7 +1334,7 @@ const NAV = [
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
 
-const TITLES = {dashboard:"Dashboard",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Performance Tracking",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
+const TITLES = {dashboard:"Dashboard",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Performance Tracking",analytics:"Analytics Import",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
 
 export default function App() {
   const [page,setPage] = useState("dashboard");
@@ -1189,6 +1347,12 @@ export default function App() {
   const [formats,setFormats] = useState(SEED_FORMATS);
   const [reviewQueue,setReviewQueue] = useState(SEED_REVIEW);
   const [bestPractice,setBestPractice] = useState(SEED_BESTPRACTICE);
+  const [analyticsImport,setAnalyticsImport] = useState(null);
+  useEffect(()=>{
+    const handler = e => { setAnalyticsImport(e.detail); setPage("analytics"); };
+    window.addEventListener("bgb-analytics-import", handler);
+    return ()=>window.removeEventListener("bgb-analytics-import", handler);
+  },[]);
 const [engineState,setEngineState] = useState({});
   const pending = reviewQueue.filter(r=>r.status==="ready").length;
   return (
@@ -1203,6 +1367,7 @@ const [engineState,setEngineState] = useState({});
               :<div key={n.id} className={`sb-item ${page===n.id?"active":""}`} onClick={()=>setPage(n.id)}>
                 <span className="ni">{n.icon}</span>{n.label}
                 {n.badge==="review"&&pending>0&&<span className="sb-badge">{pending}</span>}
+                {n.badge==="analytics"&&analyticsImport&&<span className="sb-badge">NEW</span>}
               </div>
             )}
           </nav>
@@ -1221,6 +1386,7 @@ const [engineState,setEngineState] = useState({});
             {page==="engine"&&<ContentEngine assets={assets} posts={posts} setPosts={setPosts} formats={formats} mind={mind} setPage={setPage} engineState={engineState} setEngineState={setEngineState} bestPractice={bestPractice}/>}
             {page==="publish"&&<Publishing posts={posts} setPosts={setPosts} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
+            {page==="analytics"&&<AnalyticsImport data={analyticsImport} setData={setAnalyticsImport} mind={mind} formats={formats} bestPractice={bestPractice} setBestPractice={setBestPractice} posts={posts} setPosts={setPosts} setPage={setPage}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
             {page==="mind"&&<MyMind mind={mind} setMind={setMind}/>}
