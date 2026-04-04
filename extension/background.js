@@ -123,11 +123,12 @@ async function sendToApp() {
 }
 
 // ─── LINKEDIN SCRAPER (serialised into page context) ─────────────────────────
-// !! IMPORTANT: this function runs in the LinkedIn page context via executeScript.
-// !! It cannot reference anything from background.js — must be fully self-contained.
+// !! Runs in the LinkedIn page context via executeScript — fully self-contained.
+// Returns a Promise so Chrome awaits it before returning the result.
 function linkedinScraperFn() {
 
-  // Parse LinkedIn number formats: 1.2K → 1200, 4.5M → 4500000, 1,234 → 1234
+  // ── HELPERS ────────────────────────────────────────────────────────────────
+
   function parseNum(str) {
     if (!str) return 0;
     str = String(str).trim().replace(/,/g, '').replace(/\s/g, '');
@@ -138,19 +139,16 @@ function linkedinScraperFn() {
     return isNaN(n) ? 0 : n;
   }
 
-  // Look for a metric value adjacent to a label
   function findMetric(container, labels) {
     const els = Array.from(container.querySelectorAll('*'));
     for (const el of els) {
       const t = (el.innerText || el.textContent || '').trim().toLowerCase();
       if (labels.some(l => t === l || t === l + ':')) {
-        // Check next sibling(s)
         let sib = el.nextElementSibling;
         for (let i = 0; i < 4 && sib; i++, sib = sib.nextElementSibling) {
           const v = (sib.innerText || sib.textContent || '').trim();
           if (/^[\d,.]+[KkMm]?$/.test(v)) return parseNum(v);
         }
-        // Check parent's children
         const parent = el.parentElement;
         if (parent) {
           for (const child of parent.children) {
@@ -165,7 +163,6 @@ function linkedinScraperFn() {
     return 0;
   }
 
-  // Detect post type from container DOM
   function detectType(el) {
     if (el.querySelector('video')) return 'video';
     if (el.querySelector('[class*="video"], [aria-label*="video"]')) return 'video';
@@ -180,13 +177,11 @@ function linkedinScraperFn() {
     return 'text';
   }
 
-  // Extract first meaningful line as hook
   function getHook(text) {
     if (!text) return '';
     return text.split('\n').map(l => l.trim()).filter(l => l.length > 5)[0] || '';
   }
 
-  // Filter text lines: not numeric, not metric labels, long enough
   function isContentLine(line) {
     if (line.length < 12) return false;
     if (/^[\d,.\s]+[KkMm%]?$/.test(line)) return false;
@@ -194,143 +189,127 @@ function linkedinScraperFn() {
     return true;
   }
 
-  const result = {
-    platform: 'LinkedIn',
-    scrapedAt: new Date().toISOString(),
-    url: location.href,
-    summary: { totalImpressions: 0, followerChange: 0 },
-    posts: [],
-    debug: { strategy: '', containersFound: 0 },
-    error: null
-  };
+  // ── EXTRACTION ─────────────────────────────────────────────────────────────
 
-  // ── FIND POST CONTAINERS ─────────────────────────────────────────────────
-  // Try multiple selector strategies from most to least specific
-  let containers = [];
-  const strategies = [
-    '[data-view-name="content-analytics-post-card"]',
-    '[class*="analytics-post-card"]',
-    '[class*="content-analytics-post"]',
-    '[class*="analytics-content-list__item"]',
-    '[class*="analytics"][class*="post"][class*="item"]',
-    '.scaffold-finite-scroll__content > ul > li',
-    '[class*="results-list"] > li',
-  ];
+  function extractData() {
+    const result = {
+      platform: 'LinkedIn',
+      scrapedAt: new Date().toISOString(),
+      url: location.href,
+      summary: { totalImpressions: 0, followerChange: 0 },
+      posts: [],
+      debug: { strategy: '', containersFound: 0 },
+      error: null
+    };
 
-  for (const sel of strategies) {
-    try {
-      const found = Array.from(document.querySelectorAll(sel));
-      if (found.length >= 2) {
-        containers = found;
-        result.debug.strategy = sel;
-        break;
-      }
-    } catch(e) { /* bad selector, skip */ }
-  }
+    // Try multiple selector strategies
+    let containers = [];
+    const strategies = [
+      '[data-view-name="content-analytics-post-card"]',
+      '[class*="analytics-post-card"]',
+      '[class*="content-analytics-post"]',
+      '[class*="analytics-content-list__item"]',
+      '[class*="analytics"][class*="post"][class*="item"]',
+      '.scaffold-finite-scroll__content > ul > li',
+      '[class*="results-list"] > li',
+    ];
 
-  // Fallback: find list items with impressions-like numbers
-  if (!containers.length) {
-    result.debug.strategy = 'structural-fallback';
-    const candidates = Array.from(document.querySelectorAll('li, article, [role="listitem"]'));
-    containers = candidates.filter(el => {
-      const txt = el.innerText || '';
-      const wordCount = txt.split(/\s+/).length;
-      const hasNumbers = /\d{3,}/.test(txt);
-      const hasText = txt.length > 80;
-      const notNav = !el.closest('nav, header, footer, [role="navigation"]');
-      return hasNumbers && hasText && wordCount > 8 && notNav;
-    });
-  }
-
-  result.debug.containersFound = containers.length;
-
-  if (!containers.length) {
-    result.error = 'Could not find post analytics cards. Make sure you are on the LinkedIn Analytics page and it is fully loaded. Wait for all posts to appear, then try again.';
-    return result;
-  }
-
-  // ── EXTRACT EACH POST ────────────────────────────────────────────────────
-  containers.forEach((container, idx) => {
-    try {
-      const fullText = (container.innerText || '').trim();
-      if (fullText.length < 20) return;
-
-      const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
-      const contentLines = lines.filter(isContentLine);
-      const numericLines = lines
-        .filter(l => /^[\d,.\s]+[KkMm]?$/.test(l.trim()))
-        .map(l => parseNum(l.trim()))
-        .filter(n => n > 0);
-
-      const postText = contentLines.slice(0, 6).join('\n');
-      const hook = getHook(postText);
-
-      // Try labelled extraction first, then positional fallback
-      const impressions = findMetric(container, ['impressions', 'views', 'reach']) || numericLines[0] || 0;
-      const reactions   = findMetric(container, ['reactions', 'likes'])            || numericLines[1] || 0;
-      const comments    = findMetric(container, ['comments'])                      || numericLines[2] || 0;
-      const reposts     = findMetric(container, ['reposts', 'shares'])             || numericLines[3] || 0;
-      const clicks      = findMetric(container, ['clicks', 'link clicks'])         || numericLines[4] || 0;
-
-      // Post URL
-      const linkEl = container.querySelector('a[href*="/posts/"], a[href*="/feed/update/"]');
-      const url = linkEl?.href || '';
-
-      // Post date (often in an aria-label or time element)
-      const timeEl = container.querySelector('time, [class*="date"], [class*="timestamp"]');
-      const date = timeEl?.getAttribute('datetime') || timeEl?.innerText || '';
-
-      const postType = detectType(container);
-      const total = impressions + reactions + comments + reposts;
-
-      // Only include if we got something meaningful
-      if (hook.length > 3 || impressions > 0) {
-        result.posts.push({
-          id: idx + 1,
-          hook,
-          text: postText.slice(0, 500),
-          postType,
-          impressions,
-          reactions,
-          comments,
-          reposts,
-          clicks,
-          engagementRate: impressions > 0 ? ((reactions + comments + reposts) / impressions * 100).toFixed(2) : '0',
-          url,
-          date
-        });
-      }
-    } catch (e) {
-      console.warn('[BGB Scraper] Error on post', idx, e.message);
+    for (const sel of strategies) {
+      try {
+        const found = Array.from(document.querySelectorAll(sel));
+        if (found.length >= 1) { containers = found; result.debug.strategy = sel; break; }
+      } catch(e) { /* skip */ }
     }
-  });
 
-  // ── SUMMARY METRICS ──────────────────────────────────────────────────────
-  // Try to find total impressions from the page summary header
-  const headerSelectors = [
-    '[class*="creator-analytics-header"]',
-    '[class*="analytics-summary"]',
-    '[class*="analytics-header"]',
-    '[class*="total-impressions"]',
-  ];
-  for (const sel of headerSelectors) {
-    const headerEl = document.querySelector(sel);
+    // Structural fallback: list items containing numbers and text
+    if (!containers.length) {
+      result.debug.strategy = 'structural-fallback';
+      containers = Array.from(document.querySelectorAll('li, article, [role="listitem"]')).filter(el => {
+        const txt = el.innerText || '';
+        return /\d{2,}/.test(txt) && txt.length > 60 && !el.closest('nav, header, footer, [role="navigation"]');
+      });
+    }
+
+    result.debug.containersFound = containers.length;
+
+    if (!containers.length) {
+      result.error = 'No post cards found after scrolling. Try scrolling down on the LinkedIn Analytics page manually until posts appear, then click Pull LinkedIn again.';
+      return result;
+    }
+
+    containers.forEach((container, idx) => {
+      try {
+        const fullText = (container.innerText || '').trim();
+        if (fullText.length < 20) return;
+
+        const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
+        const contentLines = lines.filter(isContentLine);
+        const numericLines = lines
+          .filter(l => /^[\d,.\s]+[KkMm]?$/.test(l.trim()))
+          .map(l => parseNum(l.trim()))
+          .filter(n => n > 0);
+
+        const postText = contentLines.slice(0, 6).join('\n');
+        const hook = getHook(postText);
+
+        const impressions = findMetric(container, ['impressions', 'views', 'reach']) || numericLines[0] || 0;
+        const reactions   = findMetric(container, ['reactions', 'likes'])            || numericLines[1] || 0;
+        const comments    = findMetric(container, ['comments'])                      || numericLines[2] || 0;
+        const reposts     = findMetric(container, ['reposts', 'shares'])             || numericLines[3] || 0;
+        const clicks      = findMetric(container, ['clicks', 'link clicks'])         || numericLines[4] || 0;
+
+        const linkEl = container.querySelector('a[href*="/posts/"], a[href*="/feed/update/"]');
+        const timeEl = container.querySelector('time, [class*="date"], [class*="timestamp"]');
+
+        if (hook.length > 3 || impressions > 0) {
+          result.posts.push({
+            id: idx + 1,
+            hook,
+            text: postText.slice(0, 500),
+            postType: detectType(container),
+            impressions,
+            reactions,
+            comments,
+            reposts,
+            clicks,
+            engagementRate: impressions > 0 ? ((reactions + comments + reposts) / impressions * 100).toFixed(2) : '0',
+            url: linkEl?.href || '',
+            date: timeEl?.getAttribute('datetime') || timeEl?.innerText || ''
+          });
+        }
+      } catch(e) {
+        console.warn('[BGB Scraper] Error on post', idx, e.message);
+      }
+    });
+
+    // Summary: try header first, fallback to summing posts
+    const headerEl = document.querySelector('[class*="creator-analytics-header"], [class*="analytics-summary"], [class*="analytics-header"]');
     if (headerEl) {
       const nums = Array.from(headerEl.querySelectorAll('*'))
         .map(el => (el.innerText || '').trim())
         .filter(t => /^[\d,.]+[KkMm]?$/.test(t))
-        .map(parseNum)
-        .filter(n => n > 0)
-        .sort((a, b) => b - a);
-      if (nums[0]) { result.summary.totalImpressions = nums[0]; break; }
+        .map(parseNum).filter(n => n > 0).sort((a, b) => b - a);
+      if (nums[0]) result.summary.totalImpressions = nums[0];
     }
-  }
-  // Fallback: sum post impressions
-  if (!result.summary.totalImpressions) {
-    result.summary.totalImpressions = result.posts.reduce((s, p) => s + p.impressions, 0);
+    if (!result.summary.totalImpressions) {
+      result.summary.totalImpressions = result.posts.reduce((s, p) => s + p.impressions, 0);
+    }
+
+    return result;
   }
 
-  return result;
+  // ── SCROLL THEN EXTRACT ────────────────────────────────────────────────────
+  // Posts list is below the chart — must scroll to trigger lazy loading
+  return new Promise((resolve) => {
+    window.scrollTo({ top: 500, behavior: 'smooth' });
+    setTimeout(() => {
+      window.scrollTo({ top: 1200, behavior: 'smooth' });
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        setTimeout(() => resolve(extractData()), 1500);
+      }, 700);
+    }, 600);
+  });
 }
 
 // ─── BRIDGE (serialised into BGB app context) ─────────────────────────────────
