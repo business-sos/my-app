@@ -197,7 +197,7 @@ const SEED_BESTPRACTICE = [
 // ─── AI ───────────────────────────────────────────────────────────────────────
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 
-async function callClaude(sys, user) {
+async function callClaude(sys, user, maxTokens=2000) {
   if (!ANTHROPIC_KEY) throw new Error("No API key found. Add VITE_ANTHROPIC_KEY to your .env file.");
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method:"POST",
@@ -207,7 +207,7 @@ async function callClaude(sys, user) {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:sys, messages:[{role:"user",content:user}] })
+    body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:maxTokens, system:sys, messages:[{role:"user",content:user}] })
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error.message);
@@ -245,7 +245,8 @@ function bpCtx(bp) {
 async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[]) {
   const raw2 = await callClaude(
     `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
-    `Raw input:\n${raw}\n\nTheme: ${theme}\nFormat: ${fmt||"best fit"}`
+    `Raw input:\n${raw}\n\nTheme: ${theme}\nFormat: ${fmt||"best fit"}`,
+    3000
   );
   return JSON.parse(raw2);
 }
@@ -269,15 +270,17 @@ async function genABTest(format, mind) {
 async function genReport(posts, formats, mind) {
   const raw = await callClaude(
     `You are the BGB Content Intelligence agent. Generate a weekly self-optimisation report.\nReturn ONLY valid JSON: {"headline":"...","topFormat":"...","topTheme":"...","docViewsPerImpression":"X.X per 1000","insights":[{"type":"win|learn|test|next","title":"...","detail":"..."}],"formatsToPromote":["..."],"nextTests":["..."],"contentQueue":["...","...","..."]}`,
-    `Posts: ${JSON.stringify(posts.map(p=>({title:p.title,theme:p.theme,format:p.format,platform:p.platform,impressions:p.impressions,docViews:p.docViews,calls:p.calls})))}\nFormats: ${JSON.stringify(formats)}`
+    `Posts: ${JSON.stringify(posts.map(p=>({title:p.title,theme:p.theme,format:p.format,platform:p.platform,impressions:p.impressions,docViews:p.docViews,calls:p.calls})))}\nFormats: ${JSON.stringify(formats)}`,
+    3000
   );
   return JSON.parse(raw);
 }
 
 async function parseRawAnalytics(rawText, postLinks, mind, formats, bestPractice) {
   const raw = await callClaude(
-    `You are the BGB Content Intelligence agent. You have received raw text scraped from a LinkedIn Analytics page. Extract every post you can identify, then analyse each one against the knowledge banks.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nPosts on LinkedIn analytics appear as: post text preview, then metrics (impressions, reactions, comments, reposts, clicks). Extract what you can.\nReturn ONLY valid JSON: {"summary":{"totalImpressions":0,"keyInsight":"...","topPattern":"...","weakestArea":"..."},"posts":[{"id":1,"hook":"first line of post","text":"post preview text","postType":"text|image|video|document","impressions":0,"reactions":0,"comments":0,"reposts":0,"clicks":0,"engagementRate":"0.00","hookScore":0-100,"matchedPattern":"pattern name or null","verdict":"strong|average|weak","whyWorked":"2 sentences","recommendation":"1 sentence","url":""}],"newPattern":{"title":"...","category":"hook|format|theme|engagement","pattern":"...","whyItWorks":"..."} or null,"recommendations":["...","..."]}`,
-    `Raw LinkedIn Analytics page text (last 7 days):\n\n${rawText}\n\nPost URLs found on page: ${postLinks?.join(', ') || 'none'}\n\nExtract all posts visible in this analytics data and analyse them.`
+    `You are the BGB Content Intelligence agent. You have received raw text scraped from a LinkedIn Analytics page. Extract every post you can identify, then analyse each one against the knowledge banks.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nPosts on LinkedIn analytics appear as: post text preview, then metrics (impressions, reactions, comments, reposts, clicks). Extract what you can. If metrics are missing, use 0.\nReturn ONLY valid JSON (no markdown, no explanation): {"summary":{"totalImpressions":0,"keyInsight":"...","topPattern":"...","weakestArea":"..."},"posts":[{"id":1,"hook":"first line of post","text":"post preview text","postType":"text|image|video|document","impressions":0,"reactions":0,"comments":0,"reposts":0,"clicks":0,"engagementRate":"0.00","hookScore":0-100,"matchedPattern":"pattern name or null","verdict":"strong|average|weak","whyWorked":"2 sentences","recommendation":"1 sentence","url":""}],"newPattern":{"title":"...","category":"hook|format|theme|engagement","pattern":"...","whyItWorks":"..."} or null,"recommendations":["...","..."]}`,
+    `Raw LinkedIn Analytics page text (last 7 days):\n\n${rawText}\n\nPost URLs found on page: ${postLinks?.join(', ') || 'none'}\n\nExtract all posts visible in this analytics data and analyse them. Focus on identifying post text previews and their associated metrics.`,
+    4000
   );
   return JSON.parse(raw);
 }
@@ -285,7 +288,8 @@ async function parseRawAnalytics(rawText, postLinks, mind, formats, bestPractice
 async function analyzeAnalyticsImport(posts, mind, formats, bestPractice) {
   const raw = await callClaude(
     `You are the BGB Content Intelligence agent. Analyse LinkedIn post performance data from the last 7 days. Compare each post's hook, structure, and post type against the knowledge banks.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY valid JSON: {"summary":{"keyInsight":"...","topPattern":"...","weakestArea":"..."},"postAnalyses":[{"id":1,"hook":"...","hookScore":0-100,"postType":"text|image|video|document|carousel","matchedPattern":"pattern name or null","verdict":"strong|average|weak","whyWorked":"2 sentences","recommendation":"1 sentence"}],"newPattern":{"title":"...","category":"hook|format|theme|engagement","pattern":"...","whyItWorks":"..."} or null,"recommendations":["...","..."]}`,
-    `Analyse these ${posts.length} LinkedIn posts from the last 7 days. Impressions/reactions/comments are LinkedIn native metrics (not doc views):\n${JSON.stringify(posts.map(p=>({id:p.id,hook:p.hook,postType:p.postType,impressions:p.impressions,reactions:p.reactions,comments:p.comments,reposts:p.reposts,clicks:p.clicks,text:p.text?.slice(0,300)})))}`
+    `Analyse these ${posts.length} LinkedIn posts from the last 7 days. Impressions/reactions/comments are LinkedIn native metrics (not doc views):\n${JSON.stringify(posts.map(p=>({id:p.id,hook:p.hook,postType:p.postType,impressions:p.impressions,reactions:p.reactions,comments:p.comments,reposts:p.reposts,clicks:p.clicks,text:p.text?.slice(0,300)})))}`,
+    3000
   );
   return JSON.parse(raw);
 }
@@ -1117,7 +1121,8 @@ function AnalyticsImport({ data, setData, mind, formats, bestPractice, setBestPr
       <div className="card">
         <div className="ct">📋 Scraped Posts ({importedPosts.length})</div>
         {importedPosts.map((post,i)=>{
-          const pa=analysis?.postAnalyses?.find(a=>a.id===post.id);
+          // parseRawAnalytics embeds analysis on each post; analyzeAnalyticsImport uses a separate postAnalyses array
+          const pa=analysis?.postAnalyses?.find(a=>a.id===post.id)||(post.verdict?post:null);
           return(
             <div key={post.id||i} className="li">
               <div className="libody">

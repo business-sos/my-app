@@ -16,7 +16,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const res = await chrome.runtime.sendMessage({ action: 'scrape_linkedin' });
       stopProgress();
       if (res?.success) {
-        setStatus(`<span class="success-mark">✓</span>${res.result.posts.length} posts scraped`);
+        const charK = Math.round((res.result.rawText?.length || 0) / 1000);
+        setStatus(`<span class="success-mark">✓</span>Captured ${charK}K chars — click Send to BGB App`);
         showImport(res.result);
       } else {
         setStatus(res?.error || 'Unknown error', 'error');
@@ -64,7 +65,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.status === 'done' && msg.data) {
         stopProgress();
         showImport(msg.data);
-        setStatus(`<span class="success-mark">✓</span>${msg.data.posts?.length || 0} posts scraped`);
+        const charK = Math.round((msg.data.rawText?.length || 0) / 1000);
+        setStatus(`<span class="success-mark">✓</span>Captured ${charK}K chars — click Send to BGB App`);
       }
     }
   });
