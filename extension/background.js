@@ -72,25 +72,17 @@ async function scrapeLinkedIn() {
   const data = results?.[0]?.result;
   if (!data) throw new Error('Scraper returned no data. Try clicking Pull LinkedIn again.');
 
-  // If 0 posts found, try waiting longer and scraping again
-  if (data.posts?.length === 0) {
-    notify('loading', 'No posts found yet — waiting longer for page to render...');
-    await sleep(4000);
-    const retry = await chrome.scripting.executeScript({ target: { tabId }, func: linkedinScraperFn });
-    const retryData = retry?.[0]?.result;
-    if (retryData?.posts?.length > 0) {
-      const importData = { ...retryData, receivedAt: new Date().toISOString() };
-      await chrome.storage.local.set({ bgb_import: importData });
-      notify('done', `Done — ${retryData.posts.length} posts scraped`, importData);
-      return importData;
-    }
-    throw new Error(data.error || 'No posts found. Make sure your LinkedIn Analytics page is fully loaded and shows posts in the list.');
+  // Raw text approach — success is measured by text length, not post count
+  // (posts are extracted by Claude in the app, not here)
+  if (!data.rawText || data.rawText.length < 200) {
+    throw new Error('Page text too short — LinkedIn may not have loaded. Try again in a few seconds.');
   }
 
   const importData = { ...data, receivedAt: new Date().toISOString() };
   await chrome.storage.local.set({ bgb_import: importData });
 
-  notify('done', `Done — ${data.posts.length} posts scraped`, importData);
+  const charCount = Math.round(data.rawText.length / 1000);
+  notify('done', `Captured — ${charCount}K chars of analytics data`, importData);
   return importData;
 }
 
