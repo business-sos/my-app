@@ -78,9 +78,10 @@ function showImport(data) {
     ? new Date(data.scrapedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '';
 
+  const hasRaw = data.rawText && data.rawText.length > 100;
   document.getElementById('import-summary').innerHTML = `
-    <div><span class="hl">${posts.length} posts</span> &nbsp;·&nbsp; ${when}</div>
-    <div><span class="hl">${totalImp >= 1000 ? (totalImp / 1000).toFixed(1) + 'K' : totalImp}</span> total impressions</div>
+    <div><span class="hl">${hasRaw ? 'Page captured' : posts.length + ' posts'}</span> &nbsp;·&nbsp; ${when}</div>
+    ${hasRaw ? `<div style="color:rgba(245,240,232,0.45);font-size:10px;margin-top:3px">${Math.round(data.rawText.length/1000)}K chars · Claude will extract posts in the app</div>` : `<div><span class="hl">${totalImp >= 1000 ? (totalImp / 1000).toFixed(1) + 'K' : totalImp}</span> total impressions</div>`}
     ${topPost?.hook ? `<div class="hook-preview">"${topPost.hook.slice(0, 60)}${topPost.hook.length > 60 ? '...' : ''}"</div>` : ''}
   `;
   document.getElementById('import-section').style.display = 'block';

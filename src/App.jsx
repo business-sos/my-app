@@ -274,6 +274,14 @@ async function genReport(posts, formats, mind) {
   return JSON.parse(raw);
 }
 
+async function parseRawAnalytics(rawText, postLinks, mind, formats, bestPractice) {
+  const raw = await callClaude(
+    `You are the BGB Content Intelligence agent. You have received raw text scraped from a LinkedIn Analytics page. Extract every post you can identify, then analyse each one against the knowledge banks.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nPosts on LinkedIn analytics appear as: post text preview, then metrics (impressions, reactions, comments, reposts, clicks). Extract what you can.\nReturn ONLY valid JSON: {"summary":{"totalImpressions":0,"keyInsight":"...","topPattern":"...","weakestArea":"..."},"posts":[{"id":1,"hook":"first line of post","text":"post preview text","postType":"text|image|video|document","impressions":0,"reactions":0,"comments":0,"reposts":0,"clicks":0,"engagementRate":"0.00","hookScore":0-100,"matchedPattern":"pattern name or null","verdict":"strong|average|weak","whyWorked":"2 sentences","recommendation":"1 sentence","url":""}],"newPattern":{"title":"...","category":"hook|format|theme|engagement","pattern":"...","whyItWorks":"..."} or null,"recommendations":["...","..."]}`,
+    `Raw LinkedIn Analytics page text (last 7 days):\n\n${rawText}\n\nPost URLs found on page: ${postLinks?.join(', ') || 'none'}\n\nExtract all posts visible in this analytics data and analyse them.`
+  );
+  return JSON.parse(raw);
+}
+
 async function analyzeAnalyticsImport(posts, mind, formats, bestPractice) {
   const raw = await callClaude(
     `You are the BGB Content Intelligence agent. Analyse LinkedIn post performance data from the last 7 days. Compare each post's hook, structure, and post type against the knowledge banks.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY valid JSON: {"summary":{"keyInsight":"...","topPattern":"...","weakestArea":"..."},"postAnalyses":[{"id":1,"hook":"...","hookScore":0-100,"postType":"text|image|video|document|carousel","matchedPattern":"pattern name or null","verdict":"strong|average|weak","whyWorked":"2 sentences","recommendation":"1 sentence"}],"newPattern":{"title":"...","category":"hook|format|theme|engagement","pattern":"...","whyItWorks":"..."} or null,"recommendations":["...","..."]}`,
@@ -990,9 +998,21 @@ function AnalyticsImport({ data, setData, mind, formats, bestPractice, setBestPr
   const [metricsSaved,setMetricsSaved] = useState(false);
 
   const runAnalysis = async () => {
-    if(!data?.posts?.length) return;
     setLoading(true); setErr("");
-    try { setAnalysis(await analyzeAnalyticsImport(data.posts,mind,formats,bestPractice)); }
+    try {
+      let result;
+      if(data?.rawText) {
+        // Raw text from extension — let Claude parse + analyse in one pass
+        result = await parseRawAnalytics(data.rawText, data.postLinks, mind, formats, bestPractice);
+        // Merge extracted posts back into data so they show in the list
+        setData(d => ({...d, posts: result.posts||[]}));
+      } else if(data?.posts?.length) {
+        result = await analyzeAnalyticsImport(data.posts, mind, formats, bestPractice);
+      } else {
+        throw new Error("No data to analyse.");
+      }
+      setAnalysis(result);
+    }
     catch(e){setErr("Analysis failed: "+e.message);}
     finally{setLoading(false);}
   };
@@ -1044,6 +1064,7 @@ function AnalyticsImport({ data, setData, mind, formats, bestPractice, setBestPr
   }
 
   const importedPosts=data.posts||[];
+  const hasRawText=!!data.rawText&&importedPosts.length===0;
   const totalImp=data.summary?.totalImpressions||importedPosts.reduce((s,p)=>s+(p.impressions||0),0);
   const topPost=[...importedPosts].sort((a,b)=>(b.impressions||0)-(a.impressions||0))[0];
   const when=data.scrapedAt?new Date(data.scrapedAt).toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
@@ -1053,7 +1074,7 @@ function AnalyticsImport({ data, setData, mind, formats, bestPractice, setBestPr
       <div className="g4 mb20">
         <div className="sc gold"><div className="sl">Posts Scraped</div><div className="sv">{importedPosts.length}</div><div className="ss">last 7 days · LinkedIn</div></div>
         <div className="sc ink"><div className="sl">Total Impressions</div><div className="sv">{totalImp>=1000?(totalImp/1000).toFixed(1)+"K":totalImp}</div></div>
-        <div className="sc sage"><div className="sl">Top Hook</div><div style={{fontSize:11,marginTop:4,fontWeight:500,lineHeight:1.4}}>{topPost?.hook?.slice(0,60)||"—"}</div></div>
+        <div className="sc sage"><div className="sl">Top Hook</div><div style={{fontSize:11,marginTop:4,fontWeight:500,lineHeight:1.4}}>{hasRawText?"Run Analysis to extract posts":topPost?.hook?.slice(0,60)||"—"}</div></div>
         <div className="sc violet"><div className="sl">Scraped</div><div style={{fontSize:11,marginTop:4,fontFamily:"DM Mono,monospace",color:"var(--ink60)"}}>{when}</div></div>
       </div>
 

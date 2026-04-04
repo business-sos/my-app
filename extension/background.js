@@ -190,116 +190,36 @@ function linkedinScraperFn() {
   }
 
   // ── EXTRACTION ─────────────────────────────────────────────────────────────
+  // Rather than brittle DOM selectors, grab the raw visible text from the page
+  // and let Claude interpret it. Much more resilient to LinkedIn DOM changes.
 
   function extractData() {
-    const result = {
+    // Grab all visible text chunks from the page body
+    const rawText = (document.body.innerText || '').trim();
+
+    // Also try to grab post URLs from the page
+    const postLinks = Array.from(document.querySelectorAll('a[href*="/posts/"], a[href*="/feed/update/"]'))
+      .map(a => a.href)
+      .filter((v, i, arr) => arr.indexOf(v) === i) // unique
+      .slice(0, 20);
+
+    // Try to detect any media thumbnails (rough post type hints)
+    const hasVideo = document.querySelector('video, [class*="video-player"], [aria-label*="video"]') !== null;
+    const imgCount = document.querySelectorAll('img[src*="media"], img[src*="dms"]').length;
+
+    return {
       platform: 'LinkedIn',
       scrapedAt: new Date().toISOString(),
       url: location.href,
+      rawText: rawText.slice(0, 12000), // Claude will parse this
+      postLinks,
+      hints: { hasVideo, imgCount },
       summary: { totalImpressions: 0, followerChange: 0 },
-      posts: [],
-      debug: { strategy: '', containersFound: 0 },
-      error: null
+      posts: [] // populated by Claude in the app
     };
-
-    // Try multiple selector strategies
-    let containers = [];
-    const strategies = [
-      '[data-view-name="content-analytics-post-card"]',
-      '[class*="analytics-post-card"]',
-      '[class*="content-analytics-post"]',
-      '[class*="analytics-content-list__item"]',
-      '[class*="analytics"][class*="post"][class*="item"]',
-      '.scaffold-finite-scroll__content > ul > li',
-      '[class*="results-list"] > li',
-    ];
-
-    for (const sel of strategies) {
-      try {
-        const found = Array.from(document.querySelectorAll(sel));
-        if (found.length >= 1) { containers = found; result.debug.strategy = sel; break; }
-      } catch(e) { /* skip */ }
-    }
-
-    // Structural fallback: list items containing numbers and text
-    if (!containers.length) {
-      result.debug.strategy = 'structural-fallback';
-      containers = Array.from(document.querySelectorAll('li, article, [role="listitem"]')).filter(el => {
-        const txt = el.innerText || '';
-        return /\d{2,}/.test(txt) && txt.length > 60 && !el.closest('nav, header, footer, [role="navigation"]');
-      });
-    }
-
-    result.debug.containersFound = containers.length;
-
-    if (!containers.length) {
-      result.error = 'No post cards found after scrolling. Try scrolling down on the LinkedIn Analytics page manually until posts appear, then click Pull LinkedIn again.';
-      return result;
-    }
-
-    containers.forEach((container, idx) => {
-      try {
-        const fullText = (container.innerText || '').trim();
-        if (fullText.length < 20) return;
-
-        const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
-        const contentLines = lines.filter(isContentLine);
-        const numericLines = lines
-          .filter(l => /^[\d,.\s]+[KkMm]?$/.test(l.trim()))
-          .map(l => parseNum(l.trim()))
-          .filter(n => n > 0);
-
-        const postText = contentLines.slice(0, 6).join('\n');
-        const hook = getHook(postText);
-
-        const impressions = findMetric(container, ['impressions', 'views', 'reach']) || numericLines[0] || 0;
-        const reactions   = findMetric(container, ['reactions', 'likes'])            || numericLines[1] || 0;
-        const comments    = findMetric(container, ['comments'])                      || numericLines[2] || 0;
-        const reposts     = findMetric(container, ['reposts', 'shares'])             || numericLines[3] || 0;
-        const clicks      = findMetric(container, ['clicks', 'link clicks'])         || numericLines[4] || 0;
-
-        const linkEl = container.querySelector('a[href*="/posts/"], a[href*="/feed/update/"]');
-        const timeEl = container.querySelector('time, [class*="date"], [class*="timestamp"]');
-
-        if (hook.length > 3 || impressions > 0) {
-          result.posts.push({
-            id: idx + 1,
-            hook,
-            text: postText.slice(0, 500),
-            postType: detectType(container),
-            impressions,
-            reactions,
-            comments,
-            reposts,
-            clicks,
-            engagementRate: impressions > 0 ? ((reactions + comments + reposts) / impressions * 100).toFixed(2) : '0',
-            url: linkEl?.href || '',
-            date: timeEl?.getAttribute('datetime') || timeEl?.innerText || ''
-          });
-        }
-      } catch(e) {
-        console.warn('[BGB Scraper] Error on post', idx, e.message);
-      }
-    });
-
-    // Summary: try header first, fallback to summing posts
-    const headerEl = document.querySelector('[class*="creator-analytics-header"], [class*="analytics-summary"], [class*="analytics-header"]');
-    if (headerEl) {
-      const nums = Array.from(headerEl.querySelectorAll('*'))
-        .map(el => (el.innerText || '').trim())
-        .filter(t => /^[\d,.]+[KkMm]?$/.test(t))
-        .map(parseNum).filter(n => n > 0).sort((a, b) => b - a);
-      if (nums[0]) result.summary.totalImpressions = nums[0];
-    }
-    if (!result.summary.totalImpressions) {
-      result.summary.totalImpressions = result.posts.reduce((s, p) => s + p.impressions, 0);
-    }
-
-    return result;
   }
 
   // ── SCROLL THEN EXTRACT ────────────────────────────────────────────────────
-  // Posts list is below the chart — must scroll to trigger lazy loading
   return new Promise((resolve) => {
     window.scrollTo({ top: 500, behavior: 'smooth' });
     setTimeout(() => {
