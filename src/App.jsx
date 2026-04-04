@@ -1072,18 +1072,19 @@ function AnalyticsImport({ data, setData, mind, formats, bestPractice, setBestPr
   return(
     <div>
       <div className="g4 mb20">
-        <div className="sc gold"><div className="sl">Posts Scraped</div><div className="sv">{importedPosts.length}</div><div className="ss">last 7 days · LinkedIn</div></div>
-        <div className="sc ink"><div className="sl">Total Impressions</div><div className="sv">{totalImp>=1000?(totalImp/1000).toFixed(1)+"K":totalImp}</div></div>
-        <div className="sc sage"><div className="sl">Top Hook</div><div style={{fontSize:11,marginTop:4,fontWeight:500,lineHeight:1.4}}>{hasRawText?"Run Analysis to extract posts":topPost?.hook?.slice(0,60)||"—"}</div></div>
-        <div className="sc violet"><div className="sl">Scraped</div><div style={{fontSize:11,marginTop:4,fontFamily:"DM Mono,monospace",color:"var(--ink60)"}}>{when}</div></div>
+        <div className="sc gold"><div className="sl">{hasRawText?"Page Captured":"Posts Found"}</div><div className="sv">{hasRawText?`${Math.round((data.rawText?.length||0)/1000)}K`:importedPosts.length}</div><div className="ss">{hasRawText?"chars · awaiting analysis":"last 7 days · LinkedIn"}</div></div>
+        <div className="sc ink"><div className="sl">Total Impressions</div><div className="sv">{totalImp>=1000?(totalImp/1000).toFixed(1)+"K":totalImp||"—"}</div></div>
+        <div className="sc sage"><div className="sl">Top Hook</div><div style={{fontSize:11,marginTop:4,fontWeight:500,lineHeight:1.4}}>{hasRawText?"↓ Run Analysis to extract":topPost?.hook?.slice(0,60)||"—"}</div></div>
+        <div className="sc violet"><div className="sl">Captured</div><div style={{fontSize:11,marginTop:4,fontFamily:"DM Mono,monospace",color:"var(--ink60)"}}>{when}</div></div>
       </div>
 
+      {hasRawText&&<div className="alert ag mb16"><strong>LinkedIn page captured.</strong> Click "Run Analysis" — Claude will read the raw analytics data and extract your posts, metrics, hooks and patterns.</div>}
       {err&&<div className="alert ar mb16">{err}</div>}
 
       <div className="card mb16">
         <div className="ct">🧠 Agent Analysis — All 3 Knowledge Banks</div>
         <div className="f fac g12 fw">
-          <button className="btn bp" onClick={runAnalysis} disabled={loading}>
+          <button className="btn bg" onClick={runAnalysis} disabled={loading}>
             {loading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}
           </button>
           <button className={`btn bsm ${metricsSaved?"bsa":"bo"}`} onClick={importMetrics}>
