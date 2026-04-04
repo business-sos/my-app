@@ -312,6 +312,68 @@ async function extractPattern(postText, mind) {
   return Array.isArray(parsed) ? parsed : (parsed.patterns || []);
 }
 
+// ─── INSTAGRAM API ────────────────────────────────────────────────────────────
+async function pullInstagramAnalytics(token) {
+  const meRes = await fetch(`https://graph.instagram.com/me?fields=id,username&access_token=${encodeURIComponent(token)}`);
+  const me = await meRes.json();
+  if (me.error) throw new Error('Instagram auth failed: ' + me.error.message);
+
+  const mediaRes = await fetch(`https://graph.instagram.com/${me.id}/media?fields=id,caption,media_type,timestamp,permalink,like_count,comments_count&limit=25&access_token=${encodeURIComponent(token)}`);
+  const mediaData = await mediaRes.json();
+  if (mediaData.error) throw new Error('Could not fetch posts: ' + mediaData.error.message);
+
+  const cutoff = Date.now() - 7*24*60*60*1000;
+  const recent = (mediaData.data||[]).filter(m => new Date(m.timestamp).getTime() > cutoff);
+  if (recent.length === 0) throw new Error('No posts found in the last 7 days on this account.');
+
+  const posts = await Promise.all(recent.map(async (m, idx) => {
+    let ins = {};
+    try {
+      const iRes = await fetch(`https://graph.instagram.com/${m.id}/insights?metric=impressions,reach,saved&access_token=${encodeURIComponent(token)}`);
+      const iData = await iRes.json();
+      if (!iData.error) (iData.data||[]).forEach(x => { ins[x.name] = x.values?.[0]?.value ?? x.value ?? 0; });
+    } catch(e) {}
+    const cap = m.caption || '';
+    const hook = cap.split('\n').map(l=>l.trim()).filter(l=>l.length>5)[0] || '(no caption)';
+    const mediaTypeMap = {CAROUSEL_ALBUM:'carousel',VIDEO:'video',IMAGE:'image'};
+    return {
+      id: idx+1,
+      hook,
+      text: cap.slice(0,400),
+      postType: mediaTypeMap[m.media_type] || 'image',
+      impressions: ins.impressions || 0,
+      reach: ins.reach || 0,
+      saves: ins.saved || 0,
+      reactions: m.like_count || 0,
+      comments: m.comments_count || 0,
+      reposts: 0, clicks: 0,
+      engagementRate: ins.reach > 0 ? (((m.like_count||0)+(m.comments_count||0))/(ins.reach)*100).toFixed(2) : '0.00',
+      url: m.permalink,
+      timestamp: m.timestamp,
+    };
+  }));
+
+  return {
+    platform: 'Instagram',
+    username: me.username,
+    scrapedAt: new Date().toISOString(),
+    posts,
+    summary: {
+      totalImpressions: posts.reduce((s,p)=>s+p.impressions,0),
+      totalSaves: posts.reduce((s,p)=>s+p.saves,0),
+    }
+  };
+}
+
+async function analyzeInstagramPosts(posts, mind, formats, bestPractice) {
+  const raw = await callClaude(
+    `You are the BGB Content Intelligence agent. Analyse Instagram post performance. Key signal: SAVES (high-intent bookmarks from business owners = strongest conversion indicator). Compare hooks, post types and patterns against all knowledge banks.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY valid JSON: {"summary":{"keyInsight":"...","topPattern":"...","weakestArea":"...","savesInsight":"what the save data tells us"},"postAnalyses":[{"id":1,"hook":"...","hookScore":0-100,"postType":"image|video|carousel","matchedPattern":"pattern name or null","verdict":"strong|average|weak","whyWorked":"2 sentences","recommendation":"1 sentence","saveSignal":"high|medium|low"}],"newPattern":{"title":"...","category":"hook|format|theme|engagement","pattern":"...","whyItWorks":"..."} or null,"recommendations":["...","..."]}`,
+    `Analyse these ${posts.length} Instagram posts from the last 7 days. SAVES is the primary conversion signal — business owners save content they plan to act on:\n${JSON.stringify(posts.map(p=>({id:p.id,hook:p.hook,postType:p.postType,impressions:p.impressions,reach:p.reach,saves:p.saves,reactions:p.reactions,comments:p.comments,text:p.text?.slice(0,300)})))}`,
+    3000
+  );
+  return JSON.parse(raw);
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function CopyBtn({ text, label="Copy" }) {
   const [done,setDone] = useState(false);
@@ -321,6 +383,39 @@ function CopyBtn({ text, label="Copy" }) {
 function Score({ v }) {
   const col = v>=70?"var(--sage)":v>=45?"var(--gold)":"var(--rust)";
   return <div className="sb2"><div className="st"><div className="sf" style={{width:`${v}%`,background:col}}/></div><span className="xs" style={{color:col,minWidth:26}}>{v}</span></div>;
+}
+
+function PostRow({ post, analysis }) {
+  const verdictCol={strong:"ts",average:"tg",weak:"tr"};
+  const typeCol={video:"tv",image:"tb",document:"tprov",carousel:"tg",text:"ti"};
+  const pa = analysis?.postAnalyses?.find(a=>a.id===post.id) || (post.verdict?post:null);
+  return (
+    <div className="li">
+      <div className="libody">
+        <div className="f fac g8 mb6">
+          <span className={`tag ${typeCol[post.postType]||"ti"}`}>{post.postType||"text"}</span>
+          {pa&&<span className={`tag ${verdictCol[pa.verdict]||"ti"}`}>{pa.verdict}</span>}
+          {pa?.matchedPattern&&<span className="tag tprov">↔ {pa.matchedPattern}</span>}
+          {pa?.hookScore!=null&&<span className="xs muted">Hook {pa.hookScore}/100</span>}
+          {pa?.saveSignal&&pa.saveSignal!=="low"&&<span className={`tag ${pa.saveSignal==="high"?"ts":"tg"}`}>{pa.saveSignal} saves</span>}
+        </div>
+        <div className="lititle">{post.hook||"(no hook)"}</div>
+        {post.text&&post.text!==post.hook&&<div className="liprev">{post.text}</div>}
+        <div className="limetrics mt6">
+          <span className="mp"><strong>{(post.impressions||0).toLocaleString()}</strong> imp</span>
+          {post.reach>0&&<span className="mp"><strong>{post.reach.toLocaleString()}</strong> reach</span>}
+          {post.saves>0&&<span className="mp hl"><strong>{post.saves}</strong> saves</span>}
+          <span className="mp"><strong>{post.reactions||0}</strong> likes</span>
+          <span className="mp"><strong>{post.comments||0}</strong> comments</span>
+          {post.reposts>0&&<span className="mp"><strong>{post.reposts}</strong> reposts</span>}
+          {post.clicks>0&&<span className="mp hl"><strong>{post.clicks}</strong> clicks</span>}
+          {post.engagementRate&&<span className="mp"><strong>{post.engagementRate}%</strong> eng</span>}
+        </div>
+        {pa&&<div className="rp mt8"><div className="sm mb4">{pa.whyWorked}</div><div className="xs" style={{color:"var(--violet)"}}>→ {pa.recommendation}</div></div>}
+        {post.url&&<div className="mt8"><a href={post.url} target="_blank" rel="noreferrer" className="btn bo bsm">View post ↗</a></div>}
+      </div>
+    </div>
+  );
 }
 
 // ─── VIEWS ────────────────────────────────────────────────────────────────────
@@ -994,166 +1089,213 @@ function ContentLibrary({ assets, setAssets }) {
   );
 }
 
-function AnalyticsImport({ data, setData, mind, formats, bestPractice, setBestPractice, posts, setPosts, setPage }) {
-  const [analysis,setAnalysis] = useState(null);
-  const [loading,setLoading] = useState(false);
-  const [err,setErr] = useState("");
-  const [patternSaved,setPatternSaved] = useState(false);
-  const [metricsSaved,setMetricsSaved] = useState(false);
+function AnalyticsImport({ data, setData, igData, setIgData, mind, formats, bestPractice, setBestPractice, posts, setPosts, setPage }) {
+  const [platform, setPlatform] = useState(data ? "linkedin" : "instagram");
+  const [igToken, setIgToken] = useState(() => localStorage.getItem('bgb_ig_token') || '');
+  const [igPulling, setIgPulling] = useState(false);
+  const [igErr, setIgErr] = useState('');
+  const [showIgSetup, setShowIgSetup] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [patternSaved, setPatternSaved] = useState(false);
+  const [metricsSaved, setMetricsSaved] = useState(false);
+
+  const saveIgToken = t => { setIgToken(t); localStorage.setItem('bgb_ig_token', t); };
+  const switchPlatform = p => { setPlatform(p); setAnalysis(null); setErr(''); };
+
+  const doPullInstagram = async () => {
+    if (!igToken.trim()) return;
+    setIgPulling(true); setIgErr('');
+    try {
+      const result = await pullInstagramAnalytics(igToken.trim());
+      setIgData(result); setAnalysis(null); setShowIgSetup(false);
+    } catch(e) { setIgErr(e.message); }
+    finally { setIgPulling(false); }
+  };
 
   const runAnalysis = async () => {
-    setLoading(true); setErr("");
+    setLoading(true); setErr('');
     try {
       let result;
-      if(data?.rawText) {
-        // Raw text from extension — let Claude parse + analyse in one pass
+      if (platform === 'instagram') {
+        if (!igData?.posts?.length) throw new Error('Pull Instagram data first.');
+        result = await analyzeInstagramPosts(igData.posts, mind, formats, bestPractice);
+      } else if (data?.rawText) {
         result = await parseRawAnalytics(data.rawText, data.postLinks, mind, formats, bestPractice);
-        // Merge extracted posts back into data so they show in the list
         setData(d => ({...d, posts: result.posts||[]}));
-      } else if(data?.posts?.length) {
+      } else if (data?.posts?.length) {
         result = await analyzeAnalyticsImport(data.posts, mind, formats, bestPractice);
       } else {
-        throw new Error("No data to analyse.");
+        throw new Error('No data to analyse.');
       }
       setAnalysis(result);
-    }
-    catch(e){setErr("Analysis failed: "+e.message);}
-    finally{setLoading(false);}
+    } catch(e) { setErr('Analysis failed: ' + e.message); }
+    finally { setLoading(false); }
   };
 
   const addPattern = () => {
-    if(!analysis?.newPattern) return;
-    setBestPractice(prev=>[...prev,{...analysis.newPattern,id:Date.now(),platform:"LinkedIn",source:"analytics-import",addedDate:new Date().toISOString().slice(0,10)}]);
-    setPatternSaved(true); setTimeout(()=>setPatternSaved(false),2000);
+    if (!analysis?.newPattern) return;
+    setBestPractice(prev => [...prev, {...analysis.newPattern, id:Date.now(), platform:platform==='instagram'?'Instagram':'LinkedIn', source:'analytics-import', addedDate:new Date().toISOString().slice(0,10)}]);
+    setPatternSaved(true); setTimeout(() => setPatternSaved(false), 2000);
   };
 
   const importMetrics = () => {
-    if(!data?.posts?.length) return;
-    let matchCount=0;
-    const updated=posts.map(post=>{
-      const matchedScraped=data.posts.find(sp=>{
-        const spHook=(sp.hook||"").toLowerCase().slice(0,30);
-        const pTitle=(post.title||"").toLowerCase();
-        const pContent=(post.content||"").split("\n")[0].toLowerCase();
-        return spHook.length>5&&(pTitle.includes(spHook.slice(0,20))||pContent.includes(spHook.slice(0,20)));
+    const src = platform === 'instagram' ? igData?.posts : data?.posts;
+    if (!src?.length) return;
+    const updated = posts.map(post => {
+      const m = src.find(sp => {
+        const h = (sp.hook||'').toLowerCase().slice(0,25);
+        const c = (post.content||'').split('\n')[0].toLowerCase();
+        return h.length > 5 && c.includes(h.slice(0,20));
       });
-      if(matchedScraped){matchCount++;return{...post,impressions:matchedScraped.impressions||post.impressions,engagement:(matchedScraped.reactions||0)+(matchedScraped.comments||0)+(matchedScraped.reposts||0)};}
-      return post;
+      return m ? {...post, impressions:m.impressions||post.impressions, engagement:(m.reactions||0)+(m.comments||0)} : post;
     });
     setPosts(updated);
-    setMetricsSaved(true); setTimeout(()=>setMetricsSaved(false),2500);
+    setMetricsSaved(true); setTimeout(() => setMetricsSaved(false), 2500);
   };
 
-  const verdictCol={strong:"ts",average:"tg",weak:"tr"};
-  const typeCol={video:"tv",image:"tb",document:"tprov",carousel:"tg",text:"ti"};
+  const liPosts = data?.posts || [];
+  const igPosts = igData?.posts || [];
+  const hasRawText = platform === 'linkedin' && !!data?.rawText && liPosts.length === 0;
+  const fmtWhen = d => d?.scrapedAt ? new Date(d.scrapedAt).toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
 
-  if(!data){
-    return(
-      <div>
-        <div className="card" style={{textAlign:"center",padding:56}}>
+  const analysisCard = analysis && (
+    <div className="card mb16">
+      <div className="ct">📊 Intelligence Report</div>
+      <div className="g3 mb12">
+        <div><div className="xs muted mb4">Key Insight</div><div className="sm">{analysis.summary?.keyInsight}</div></div>
+        <div><div className="xs muted mb4">Top Pattern</div><div className="sm">{analysis.summary?.topPattern}</div></div>
+        <div><div className="xs muted mb4">Weakest Area</div><div className="sm">{analysis.summary?.weakestArea||analysis.summary?.savesInsight}</div></div>
+      </div>
+      {analysis.recommendations?.length>0&&<div className="div">{analysis.recommendations.map((r,i)=><div key={i} className="f g8 mb6 mt8"><span style={{color:'var(--gold)',fontWeight:700}}>→</span><span className="sm">{r}</span></div>)}</div>}
+      {analysis.newPattern&&<div className="alert av mt12"><strong>New pattern detected:</strong> "{analysis.newPattern.title}" — {analysis.newPattern.pattern}</div>}
+    </div>
+  );
+
+  const actionBar = (
+    <div className="card mb16">
+      <div className="ct">🧠 Agent Analysis — All 3 Knowledge Banks</div>
+      <div className="f fac g12 fw">
+        <button className="btn bg" onClick={runAnalysis} disabled={loading}>{loading?<><span className="spin"/> Analysing...</>:'Run Analysis →'}</button>
+        <button className={`btn bsm ${metricsSaved?'bsa':'bo'}`} onClick={importMetrics}>{metricsSaved?'✓ Metrics Updated':'Import Metrics to Tracking'}</button>
+        {analysis?.newPattern&&<button className={`btn bsm ${patternSaved?'bsa':'bv'}`} onClick={addPattern}>{patternSaved?'✓ Pattern Saved':'+ Add to Best Practice KB'}</button>}
+      </div>
+      {err&&<div className="alert ar mt12">{err}</div>}
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Platform tabs */}
+      <div className="tabs" style={{marginBottom:20}}>
+        <div className={`tab ${platform==='linkedin'?'active':''}`} onClick={()=>switchPlatform('linkedin')}>
+          in&nbsp; LinkedIn {data&&<span style={{marginLeft:5,color:'var(--sage)',fontSize:9}}>●</span>}
+        </div>
+        <div className={`tab ${platform==='instagram'?'active':''}`} onClick={()=>switchPlatform('instagram')}>
+          ▣&nbsp; Instagram {igData&&<span style={{marginLeft:5,color:'var(--sage)',fontSize:9}}>●</span>}
+        </div>
+      </div>
+
+      {/* ── LINKEDIN ── */}
+      {platform === 'linkedin' && (!data ? (
+        <div className="card" style={{textAlign:'center',padding:56}}>
           <div style={{fontSize:40,marginBottom:14}}>📥</div>
-          <div className="serif" style={{fontSize:18,marginBottom:8}}>No import pending</div>
+          <div className="serif" style={{fontSize:18,marginBottom:8}}>No LinkedIn import pending</div>
           <div className="muted sm mb20">Install the BGB Chrome extension, open it, and click "Pull LinkedIn Analytics".</div>
-          <div className="alert ag" style={{textAlign:"left",maxWidth:420,margin:"0 auto"}}>
+          <div className="alert ag" style={{textAlign:'left',maxWidth:420,margin:'0 auto'}}>
             <strong>How to install the extension:</strong><br/>
             1. Open Chrome → go to <code>chrome://extensions</code><br/>
             2. Enable <strong>Developer mode</strong> (top right)<br/>
             3. Click <strong>Load unpacked</strong><br/>
-            4. Select the <code>extension/</code> folder from this project<br/>
-            5. The BGB icon will appear in your toolbar
+            4. Select the <code>extension/</code> folder from this project
           </div>
         </div>
-      </div>
-    );
-  }
-
-  const importedPosts=data.posts||[];
-  const hasRawText=!!data.rawText&&importedPosts.length===0;
-  const totalImp=data.summary?.totalImpressions||importedPosts.reduce((s,p)=>s+(p.impressions||0),0);
-  const topPost=[...importedPosts].sort((a,b)=>(b.impressions||0)-(a.impressions||0))[0];
-  const when=data.scrapedAt?new Date(data.scrapedAt).toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
-
-  return(
-    <div>
-      <div className="g4 mb20">
-        <div className="sc gold"><div className="sl">{hasRawText?"Page Captured":"Posts Found"}</div><div className="sv">{hasRawText?`${Math.round((data.rawText?.length||0)/1000)}K`:importedPosts.length}</div><div className="ss">{hasRawText?"chars · awaiting analysis":"last 7 days · LinkedIn"}</div></div>
-        <div className="sc ink"><div className="sl">Total Impressions</div><div className="sv">{totalImp>=1000?(totalImp/1000).toFixed(1)+"K":totalImp||"—"}</div></div>
-        <div className="sc sage"><div className="sl">Top Hook</div><div style={{fontSize:11,marginTop:4,fontWeight:500,lineHeight:1.4}}>{hasRawText?"↓ Run Analysis to extract":topPost?.hook?.slice(0,60)||"—"}</div></div>
-        <div className="sc violet"><div className="sl">Captured</div><div style={{fontSize:11,marginTop:4,fontFamily:"DM Mono,monospace",color:"var(--ink60)"}}>{when}</div></div>
-      </div>
-
-      {hasRawText&&<div className="alert ag mb16"><strong>LinkedIn page captured.</strong> Click "Run Analysis" — Claude will read the raw analytics data and extract your posts, metrics, hooks and patterns.</div>}
-      {err&&<div className="alert ar mb16">{err}</div>}
-
-      <div className="card mb16">
-        <div className="ct">🧠 Agent Analysis — All 3 Knowledge Banks</div>
-        <div className="f fac g12 fw">
-          <button className="btn bg" onClick={runAnalysis} disabled={loading}>
-            {loading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}
-          </button>
-          <button className={`btn bsm ${metricsSaved?"bsa":"bo"}`} onClick={importMetrics}>
-            {metricsSaved?"✓ Metrics Updated":"Import Metrics to Tracking"}
-          </button>
-          {analysis?.newPattern&&(
-            <button className={`btn bsm ${patternSaved?"bsa":"bv"}`} onClick={addPattern}>
-              {patternSaved?"✓ Pattern Saved":"+ Add to Best Practice KB"}
-            </button>
-          )}
-          <button className="btn bo bsm mla" onClick={()=>{setData(null);setAnalysis(null);setPage("dashboard");}}>Clear Import</button>
-        </div>
-      </div>
-
-      {analysis&&(
+      ) : (
         <>
-          <div className="card mb16">
-            <div className="ct">📊 Intelligence Report</div>
-            <div className="g3 mb12">
-              <div><div className="xs muted mb4">Key Insight</div><div className="sm">{analysis.summary?.keyInsight}</div></div>
-              <div><div className="xs muted mb4">Top Pattern</div><div className="sm">{analysis.summary?.topPattern}</div></div>
-              <div><div className="xs muted mb4">Weakest Area</div><div className="sm">{analysis.summary?.weakestArea}</div></div>
-            </div>
-            {analysis.recommendations?.length>0&&<div className="div">{analysis.recommendations.map((r,i)=><div key={i} className="f g8 mb6 mt8"><span style={{color:"var(--gold)",fontWeight:700}}>→</span><span className="sm">{r}</span></div>)}</div>}
-            {analysis.newPattern&&<div className="alert av mt12"><strong>New pattern detected:</strong> "{analysis.newPattern.title}" — {analysis.newPattern.pattern}</div>}
+          <div className="g4 mb20">
+            <div className="sc gold"><div className="sl">{hasRawText?'Page Captured':'Posts Found'}</div><div className="sv">{hasRawText?`${Math.round((data.rawText?.length||0)/1000)}K`:liPosts.length}</div><div className="ss">{hasRawText?'chars · awaiting analysis':'last 7 days'}</div></div>
+            <div className="sc ink"><div className="sl">Total Impressions</div><div className="sv">{(data.summary?.totalImpressions||liPosts.reduce((s,p)=>s+(p.impressions||0),0)||0)>=1000?((data.summary?.totalImpressions||0)/1000).toFixed(1)+'K':data.summary?.totalImpressions||'—'}</div></div>
+            <div className="sc sage"><div className="sl">Top Hook</div><div style={{fontSize:11,marginTop:4,fontWeight:500,lineHeight:1.4}}>{hasRawText?'↓ Run Analysis to extract':[...liPosts].sort((a,b)=>(b.impressions||0)-(a.impressions||0))[0]?.hook?.slice(0,55)||'—'}</div></div>
+            <div className="sc violet"><div className="sl">Captured</div><div style={{fontSize:11,marginTop:4,fontFamily:'DM Mono,monospace',color:'var(--ink60)'}}>{fmtWhen(data)}</div></div>
+          </div>
+          {hasRawText&&<div className="alert ag mb16"><strong>LinkedIn page captured.</strong> Click "Run Analysis" — Claude will read the raw analytics data and extract your posts, metrics, hooks and patterns.</div>}
+          {actionBar}
+          {analysisCard}
+          <div className="card">
+            <div className="ct">📋 Scraped Posts ({liPosts.length}) <button className="btn bo bsm mla" onClick={()=>{setData(null);setAnalysis(null);}}>Clear</button></div>
+            {liPosts.map((post,i)=><PostRow key={post.id||i} post={post} analysis={analysis}/>)}
           </div>
         </>
-      )}
+      ))}
 
-      <div className="card">
-        <div className="ct">📋 Scraped Posts ({importedPosts.length})</div>
-        {importedPosts.map((post,i)=>{
-          // parseRawAnalytics embeds analysis on each post; analyzeAnalyticsImport uses a separate postAnalyses array
-          const pa=analysis?.postAnalyses?.find(a=>a.id===post.id)||(post.verdict?post:null);
-          return(
-            <div key={post.id||i} className="li">
-              <div className="libody">
-                <div className="f fac g8 mb6">
-                  <span className={`tag ${typeCol[post.postType]||"ti"}`}>{post.postType||"text"}</span>
-                  {pa&&<span className={`tag ${verdictCol[pa.verdict]||"ti"}`}>{pa.verdict}</span>}
-                  {pa?.matchedPattern&&<span className="tag tprov">↔ {pa.matchedPattern}</span>}
-                  {pa?.hookScore!=null&&<span className="xs muted">Hook {pa.hookScore}/100</span>}
-                </div>
-                <div className="lititle">{post.hook||"(no hook extracted)"}</div>
-                {post.text&&post.text!==post.hook&&<div className="liprev">{post.text}</div>}
-                <div className="limetrics mt6">
-                  <span className="mp"><strong>{(post.impressions||0).toLocaleString()}</strong> imp</span>
-                  <span className="mp"><strong>{post.reactions||0}</strong> reactions</span>
-                  <span className="mp"><strong>{post.comments||0}</strong> comments</span>
-                  <span className="mp"><strong>{post.reposts||0}</strong> reposts</span>
-                  {post.clicks>0&&<span className="mp hl"><strong>{post.clicks}</strong> clicks</span>}
-                  {post.engagementRate&&<span className="mp"><strong>{post.engagementRate}%</strong> eng</span>}
-                </div>
-                {pa&&(
-                  <div className="rp mt8">
-                    <div className="sm mb4">{pa.whyWorked}</div>
-                    <div className="xs" style={{color:"var(--violet)"}}>→ {pa.recommendation}</div>
-                  </div>
-                )}
-                {post.url&&<div className="mt8"><a href={post.url} target="_blank" rel="noreferrer" className="btn bo bsm">View post ↗</a></div>}
+      {/* ── INSTAGRAM ── */}
+      {platform === 'instagram' && (
+        <>
+          {/* Token setup card */}
+          {(!igToken || showIgSetup) && (
+            <div className="card mb16">
+              <div className="ct">🔗 Connect Instagram — One-time Setup</div>
+              <div className="alert ag mb16" style={{lineHeight:2.1}}>
+                <strong>How to get your access token:</strong><br/>
+                1. Make sure your Instagram is a <strong>Professional account</strong> (Creator or Business)<br/>
+                2. Go to <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noreferrer" style={{color:'#7a5a1a',fontWeight:600}}>Facebook Graph API Explorer ↗</a><br/>
+                3. Select your app (create one free at developers.facebook.com if needed)<br/>
+                4. Add permissions: <code>instagram_basic</code> + <code>instagram_manage_insights</code><br/>
+                5. Click <strong>Generate Access Token</strong>, approve, then copy it below
               </div>
+              <div className="fg">
+                <label className="lbl">Access Token</label>
+                <input className="inp" type="password" placeholder="EAAxxxxxxxxxxxxxxx..." value={igToken} onChange={e=>setIgToken(e.target.value)}/>
+              </div>
+              <div className="f g12">
+                <button className="btn bg" style={{flex:1}} onClick={()=>saveIgToken(igToken)} disabled={!igToken.trim()}>Save Token →</button>
+                {showIgSetup&&<button className="btn bo" onClick={()=>setShowIgSetup(false)}>Cancel</button>}
+              </div>
+              <div className="xs muted mt8">Token saved locally in your browser. Tokens expire after 60 days — update it here when needed.</div>
             </div>
-          );
-        })}
-      </div>
+          )}
+
+          {igToken && !showIgSetup && (
+            <div className="card mb16">
+              <div className="ct">📲 Pull Instagram Analytics</div>
+              <div className="f fac g12 fw">
+                <button className="btn bg" onClick={doPullInstagram} disabled={igPulling}>
+                  {igPulling?<><span className="spin"/> Pulling posts + insights...</>:'▣ Pull Instagram (last 7 days) →'}
+                </button>
+                <button className="btn bo bsm" onClick={()=>setShowIgSetup(true)}>Update Token</button>
+                {igData&&<span className="xs muted mla">Last pull: {fmtWhen(igData)}</span>}
+              </div>
+              {igErr&&<div className="alert ar mt12">{igErr}</div>}
+            </div>
+          )}
+
+          {igData && igPosts.length > 0 && (
+            <>
+              <div className="g4 mb20">
+                <div className="sc gold"><div className="sl">Posts Found</div><div className="sv">{igPosts.length}</div><div className="ss">last 7 days · Instagram</div></div>
+                <div className="sc ink"><div className="sl">Total Impressions</div><div className="sv">{igData.summary?.totalImpressions>=1000?(igData.summary.totalImpressions/1000).toFixed(1)+'K':igData.summary?.totalImpressions||0}</div></div>
+                <div className="sc rust"><div className="sl">Total Saves</div><div className="sv">{igData.summary?.totalSaves||0}</div><div className="ss">primary signal ↑</div></div>
+                <div className="sc violet"><div className="sl">Account</div><div style={{fontSize:14,marginTop:4,fontWeight:600}}>@{igData.username||'—'}</div></div>
+              </div>
+              {actionBar}
+              {analysisCard}
+              <div className="card">
+                <div className="ct">📋 Instagram Posts ({igPosts.length})</div>
+                {igPosts.map((post,i)=><PostRow key={post.id||i} post={post} analysis={analysis}/>)}
+              </div>
+            </>
+          )}
+
+          {igToken && !showIgSetup && !igPulling && (!igData || igPosts.length===0) && (
+            <div className="card" style={{textAlign:'center',padding:40}}>
+              <div style={{fontSize:36,marginBottom:12}}>▣</div>
+              <div className="serif" style={{fontSize:16,marginBottom:8}}>Ready to pull</div>
+              <div className="muted sm">Click "Pull Instagram" above to fetch your last 7 days of posts with impressions, reach and saves.</div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -1375,6 +1517,7 @@ export default function App() {
   const [reviewQueue,setReviewQueue] = useState(SEED_REVIEW);
   const [bestPractice,setBestPractice] = useState(SEED_BESTPRACTICE);
   const [analyticsImport,setAnalyticsImport] = useState(null);
+  const [instagramImport,setInstagramImport] = useState(null);
   useEffect(()=>{
     const handler = e => { setAnalyticsImport(e.detail); setPage("analytics"); };
     window.addEventListener("bgb-analytics-import", handler);
@@ -1394,7 +1537,7 @@ const [engineState,setEngineState] = useState({});
               :<div key={n.id} className={`sb-item ${page===n.id?"active":""}`} onClick={()=>setPage(n.id)}>
                 <span className="ni">{n.icon}</span>{n.label}
                 {n.badge==="review"&&pending>0&&<span className="sb-badge">{pending}</span>}
-                {n.badge==="analytics"&&analyticsImport&&<span className="sb-badge">NEW</span>}
+                {n.badge==="analytics"&&(analyticsImport||instagramImport)&&<span className="sb-badge">NEW</span>}
               </div>
             )}
           </nav>
@@ -1413,7 +1556,7 @@ const [engineState,setEngineState] = useState({});
             {page==="engine"&&<ContentEngine assets={assets} posts={posts} setPosts={setPosts} formats={formats} mind={mind} setPage={setPage} engineState={engineState} setEngineState={setEngineState} bestPractice={bestPractice}/>}
             {page==="publish"&&<Publishing posts={posts} setPosts={setPosts} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
-            {page==="analytics"&&<AnalyticsImport data={analyticsImport} setData={setAnalyticsImport} mind={mind} formats={formats} bestPractice={bestPractice} setBestPractice={setBestPractice} posts={posts} setPosts={setPosts} setPage={setPage}/>}
+            {page==="analytics"&&<AnalyticsImport data={analyticsImport} setData={setAnalyticsImport} igData={instagramImport} setIgData={setInstagramImport} mind={mind} formats={formats} bestPractice={bestPractice} setBestPractice={setBestPractice} posts={posts} setPosts={setPosts} setPage={setPage}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
             {page==="mind"&&<MyMind mind={mind} setMind={setMind}/>}
