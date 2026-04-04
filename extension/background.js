@@ -35,6 +35,8 @@ async function scrapeLinkedIn() {
   if (existing.length > 0) {
     tabId = existing[0].id;
     await chrome.tabs.update(tabId, { url: LINKEDIN_URL, active: true });
+    // Brief pause then check — if already loaded, waitForLoad will return immediately
+    await sleep(300);
   } else {
     const tab = await chrome.tabs.create({ url: LINKEDIN_URL, active: true });
     tabId = tab.id;
@@ -43,19 +45,47 @@ async function scrapeLinkedIn() {
   notify('loading', 'Waiting for LinkedIn to load...');
   await waitForLoad(tabId);
 
+  // Check what page actually loaded (catches login redirects)
+  const tabInfo = await chrome.tabs.get(tabId);
+  if (tabInfo.url && tabInfo.url.includes('login')) {
+    throw new Error('LinkedIn redirected to login. Please log in to LinkedIn first, then try again.');
+  }
+  if (tabInfo.url && !tabInfo.url.includes('analytics')) {
+    throw new Error(`Unexpected page: ${tabInfo.url}. Make sure you are logged in to LinkedIn.`);
+  }
+
   // LinkedIn analytics renders data asynchronously — give it time
   notify('loading', 'Waiting for analytics data to render...');
-  await sleep(4000);
+  await sleep(5000);
 
   notify('scraping', 'Extracting post data...');
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: linkedinScraperFn
-  });
+  let results;
+  try {
+    results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: linkedinScraperFn
+    });
+  } catch(e) {
+    throw new Error('Could not run scraper: ' + e.message + '. Check you are logged in to LinkedIn.');
+  }
 
-  const data = results[0]?.result;
-  if (!data) throw new Error('Scraper returned no data. Is LinkedIn Analytics fully loaded?');
-  if (data.error && !data.posts?.length) throw new Error(data.error);
+  const data = results?.[0]?.result;
+  if (!data) throw new Error('Scraper returned no data. Try clicking Pull LinkedIn again.');
+
+  // If 0 posts found, try waiting longer and scraping again
+  if (data.posts?.length === 0) {
+    notify('loading', 'No posts found yet — waiting longer for page to render...');
+    await sleep(4000);
+    const retry = await chrome.scripting.executeScript({ target: { tabId }, func: linkedinScraperFn });
+    const retryData = retry?.[0]?.result;
+    if (retryData?.posts?.length > 0) {
+      const importData = { ...retryData, receivedAt: new Date().toISOString() };
+      await chrome.storage.local.set({ bgb_import: importData });
+      notify('done', `Done — ${retryData.posts.length} posts scraped`, importData);
+      return importData;
+    }
+    throw new Error(data.error || 'No posts found. Make sure your LinkedIn Analytics page is fully loaded and shows posts in the list.');
+  }
 
   const importData = { ...data, receivedAt: new Date().toISOString() };
   await chrome.storage.local.set({ bgb_import: importData });
@@ -312,11 +342,21 @@ function bridgeFn(data) {
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function waitForLoad(tabId) {
+async function waitForLoad(tabId) {
+  // Check if already complete — avoids race condition where tab
+  // finishes loading before the onUpdated listener is attached
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'complete') {
+      await sleep(200);
+      return;
+    }
+  } catch(e) { /* tab may not exist yet, fall through */ }
+
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
-      resolve(); // resolve even on timeout — page may still be usable
+      resolve(); // resolve on timeout — page may still be usable
     }, 20000);
 
     function listener(id, info) {
