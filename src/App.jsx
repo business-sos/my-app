@@ -296,42 +296,57 @@ async function analyzeAnalyticsImport(posts, mind, formats, bestPractice) {
 
 // ─── HISTORICAL ANALYSIS ─────────────────────────────────────────────────────
 function parseLinkedInCSV(text) {
-  // Robust CSV parser — handles quoted fields with embedded newlines
+  const MONTHS = {January:'01',February:'02',March:'03',April:'04',May:'05',June:'06',July:'07',August:'08',September:'09',October:'10',November:'11',December:'12'};
+  const parseISODate = str => {
+    // "April 3, 2026" or "2024-03-15" or "2024-03-15 10:30:00 UTC"
+    const m = str.match(/([A-Z][a-z]+)\s+(\d+),\s+(\d{4})/);
+    if (m) return `${m[3]}-${MONTHS[m[1]]||'00'}-${m[2].padStart(2,'0')}`;
+    return str.slice(0,10);
+  };
   const parseRow = row => {
     const fields = []; let field = ''; let inQ = false;
     for (let i = 0; i < row.length; i++) {
       const ch = row[i];
       if (ch === '"') { if (inQ && row[i+1]==='"') { field+='"'; i++; } else { inQ=!inQ; } }
-      else if (ch === ',' && !inQ) { fields.push(field); field = ''; }
+      else if (ch === ',' && !inQ) { fields.push(field); field=''; }
       else { field += ch; }
     }
     fields.push(field); return fields;
   };
-  // Split respecting quoted newlines
   const rows = []; let cur = ''; let inQ = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (ch === '"') { inQ = !inQ; cur += ch; }
-    else if ((ch === '\n' || ch === '\r') && !inQ) { if (cur.trim()) rows.push(cur); cur = ''; if (ch==='\r'&&text[i+1]==='\n') i++; }
-    else { cur += ch; }
+    if (ch === '"') { inQ=!inQ; cur+=ch; }
+    else if ((ch==='\n'||ch==='\r') && !inQ) { if (cur.trim()) rows.push(cur); cur=''; if (ch==='\r'&&text[i+1]==='\n') i++; }
+    else { cur+=ch; }
   }
   if (cur.trim()) rows.push(cur);
   if (rows.length < 2) return [];
-  const headers = parseRow(rows[0]).map(h => h.trim().toLowerCase().replace(/[^a-z]/g,''));
-  const dateIdx = headers.findIndex(h => h.includes('date'));
-  const textIdx = headers.findIndex(h => h.includes('sharecommentary') || h.includes('commentary') || h.includes('text') || h.includes('content'));
-  const likeIdx = headers.findIndex(h => h.includes('like') || h.includes('reaction'));
-  const commentIdx = headers.findIndex(h => h.includes('comment'));
+  const headers = parseRow(rows[0]).map(h=>h.trim().toLowerCase().replace(/[^a-z]/g,''));
+
+  // Rich_Media.csv format: Date/Time, Media Description, Media Link
+  const isRichMedia = headers[0]==='datetime' || headers[0]==='datetime' || rows[0].toLowerCase().includes('media description');
+  if (isRichMedia) {
+    return rows.slice(1).map(line => {
+      const f = parseRow(line);
+      const dateTimeStr = (f[0]||'').trim();
+      const postText = (f[1]||'').trim();
+      if (!postText || postText === '-' || postText.length < 15) return null;
+      const postType = /video/i.test(dateTimeStr) ? 'video' : 'image';
+      return { date: parseISODate(dateTimeStr), text: postText, postType, likes:0, comments:0 };
+    }).filter(Boolean);
+  }
+
+  // Shares.csv format
+  const dateIdx = headers.findIndex(h=>h.includes('date'));
+  const textIdx = headers.findIndex(h=>h.includes('sharecommentary')||h.includes('commentary')||h.includes('text')||h.includes('content'));
+  const likeIdx = headers.findIndex(h=>h.includes('like')||h.includes('reaction'));
+  const commentIdx = headers.findIndex(h=>h.includes('comment'));
   return rows.slice(1).map(line => {
     const f = parseRow(line);
     const t = (f[textIdx]||'').trim();
     if (!t || t.length < 10) return null;
-    return {
-      date: (f[dateIdx]||'').trim().slice(0,10),
-      text: t,
-      likes: parseInt(f[likeIdx]||'0')||0,
-      comments: parseInt(f[commentIdx]||'0')||0,
-    };
+    return { date: parseISODate((f[dateIdx]||'').trim()), text: t, likes:parseInt(f[likeIdx]||'0')||0, comments:parseInt(f[commentIdx]||'0')||0 };
   }).filter(Boolean);
 }
 
@@ -1372,9 +1387,9 @@ function AnalyticsImport({ data, setData, igData, setIgData, mind, formats, best
             <div className="ct">📦 Step 1 — Download your LinkedIn data</div>
             <div style={{lineHeight:2.1,fontSize:13}}>
               1. Go to LinkedIn → <strong>Settings &amp; Privacy → Data Privacy</strong><br/>
-              2. Click <strong>"Get a copy of your data"</strong><br/>
-              3. Select <strong>Posts</strong> only (arrives in ~10 minutes)<br/>
-              4. Download the ZIP, unzip it, find <strong>Shares.csv</strong>
+              2. Click <strong>"Get a copy of your data"</strong> → Download larger archive<br/>
+              3. Request archive → LinkedIn emails you a download link (~10 mins)<br/>
+              4. Download the ZIP, unzip it, find <strong>Rich_Media.csv</strong> (or Shares.csv)
             </div>
           </div>
 
@@ -1382,8 +1397,8 @@ function AnalyticsImport({ data, setData, igData, setIgData, mind, formats, best
           <div className="card mb16">
             <div className="ct">📂 Step 2 — Upload Shares.csv</div>
             <div className="fg">
-              <label className="lbl">Select your Shares.csv file</label>
-              <input type="file" accept=".csv,.zip" style={{fontSize:13,padding:'8px 0'}} onChange={e=>{
+              <label className="lbl">Select Rich_Media.csv or Shares.csv</label>
+              <input type="file" accept=".csv" style={{fontSize:13,padding:'8px 0'}} onChange={e=>{
                 const file = e.target.files?.[0]; if(!file) return;
                 const reader = new FileReader();
                 reader.onload = ev => {
