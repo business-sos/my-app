@@ -189,7 +189,7 @@ const SEED_REVIEW = [
 // ─── AI ───────────────────────────────────────────────────────────────────────
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 
-async function callClaude(sys, user) {
+async function callClaude(sys, user, maxTokens=2000) {
   if (!ANTHROPIC_KEY) throw new Error("No API key found. Add VITE_ANTHROPIC_KEY to your .env file.");
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method:"POST",
@@ -199,7 +199,7 @@ async function callClaude(sys, user) {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:sys, messages:[{role:"user",content:user}] })
+    body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:maxTokens, system:sys, messages:[{role:"user",content:user}] })
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error.message);
@@ -222,10 +222,20 @@ function fmtCtx(formats) {
 
 async function genPosts(raw, theme, fmt, mind, formats) {
   const raw2 = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
-    `Raw input:\n${raw}\n\nTheme: ${theme}\nFormat: ${fmt||"best fit"}`
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\nIf no theme or format is specified, auto-pick the best ones from the knowledge banks. Return ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \\n for line breaks in content. Format: {"chosenTheme":"...","chosenFormat":"...","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\\nline2\\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
+    `Raw input:\n${raw||"Pick the most compelling BGB topic right now based on the knowledge banks."}\n\nTheme: ${theme||"auto-pick best"}\nFormat: ${fmt||"auto-pick best"}`,
+    3000
   );
   return JSON.parse(raw2);
+}
+
+async function genWeekPosts(mind, formats) {
+  const raw = await callClaude(
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\nGenerate 5 LinkedIn posts for this week — each on a DIFFERENT theme, each using the best format for that theme. Return ONLY valid JSON (no extra text, no markdown): {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks","rationale":"one sentence why this theme+format combo works right now"}]}`,
+    `Generate 5 varied LinkedIn posts for Stephen's week. Cover different angles: delegation, GM install, owner freedom, contrarian takes, client stories. Each should be distinctly different in angle and approach.`,
+    4000
+  );
+  return JSON.parse(raw);
 }
 
 async function analysePost(post, mind, formats) {
@@ -247,7 +257,8 @@ async function genABTest(format, mind) {
 async function genReport(posts, formats, mind) {
   const raw = await callClaude(
     `You are the BGB Content Intelligence agent. Generate a weekly self-optimisation report.\nReturn ONLY valid JSON: {"headline":"...","topFormat":"...","topTheme":"...","docViewsPerImpression":"X.X per 1000","insights":[{"type":"win|learn|test|next","title":"...","detail":"..."}],"formatsToPromote":["..."],"nextTests":["..."],"contentQueue":["...","...","..."]}`,
-    `Posts: ${JSON.stringify(posts.map(p=>({title:p.title,theme:p.theme,format:p.format,platform:p.platform,impressions:p.impressions,docViews:p.docViews,calls:p.calls})))}\nFormats: ${JSON.stringify(formats)}`
+    `Posts: ${JSON.stringify(posts.map(p=>({title:p.title,theme:p.theme,format:p.format,platform:p.platform,impressions:p.impressions,docViews:p.docViews,calls:p.calls})))}\nFormats: ${JSON.stringify(formats)}`,
+    3000
   );
   return JSON.parse(raw);
 }
@@ -264,7 +275,7 @@ function Score({ v }) {
 }
 
 // ─── VIEWS ────────────────────────────────────────────────────────────────────
-function Dashboard({ posts, formats, reviewQueue, setPage }) {
+function Dashboard({ posts, formats, reviewQueue, contentQueue, setPage, postFromQueue }) {
   const pub = posts.filter(p=>p.status==="published");
   const totalDV = pub.reduce((s,p)=>s+p.docViews,0);
   const totalCalls = pub.reduce((s,p)=>s+p.calls,0);
@@ -274,12 +285,29 @@ function Dashboard({ posts, formats, reviewQueue, setPage }) {
   const testing = formats.filter(f=>f.status==="testing").length;
   const pending = reviewQueue.filter(r=>r.status==="ready").length;
   const topPost = [...pub].sort((a,b)=>b.docViews-a.docViews)[0];
+  const queue = contentQueue||[];
   return (
     <div>
       <div className="alert ag mb20 f fac g8">
         <span className="pulse"/><span><strong>Agent active.</strong> {pending} post{pending!==1?"s":""} ready for 7-day review · {proven} proven formats · {testing} in test</span>
         {pending>0&&<button className="btn bg bsm mla" onClick={()=>setPage("review")}>Review now →</button>}
       </div>
+      {queue.length>0&&(
+        <div className="card mb16" style={{borderColor:"rgba(201,168,76,0.4)"}}>
+          <div className="ct">▦ Content Queue <span className="xs muted" style={{fontWeight:400,marginLeft:4}}>— {queue.length} post{queue.length!==1?"s":""} ready</span>
+            <div className="cta"><button className="btn bo bsm" onClick={()=>setPage("queue")}>View all →</button><button className="btn bp bsm" onClick={()=>setPage("generate")}>+ Generate</button></div>
+          </div>
+          {queue.slice(0,3).map(item=>(
+            <div key={item.id} className="li">
+              <div className="libody">
+                <div className="f fac g8 mb4"><span className="tag tb">{item.platform}</span>{item.theme&&<span className="tag tg">{item.theme}</span>}{item.format&&<span className="tag ti">{item.format}</span>}</div>
+                <div className="lititle">{item.hook||item.content.split('\n')[0].slice(0,70)}</div>
+                <div className="f g8 mt8"><button className="btn bg bsm" onClick={()=>postFromQueue&&postFromQueue(item)}>Copy & Post →</button></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="g4 mb20">
         <div className="sc gold"><div className="sl">Doc Views</div><div className="sv">{totalDV}</div><div className="ss">offer doc opens</div></div>
         <div className="sc rust"><div className="sl">Calls Booked</div><div className="sv">{totalCalls}</div><div className="ss">of 5 target</div></div>
@@ -934,13 +962,142 @@ function ContentLibrary({ assets, setAssets }) {
   );
 }
 
+function GeneratePage({ mind, formats, assets, addToQueue, setPage }) {
+  const [raw, setRaw] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [weekLoading, setWeekLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+  const [weekDone, setWeekDone] = useState(false);
+
+  const generate = async () => {
+    setLoading(true); setErr(""); setResult(null);
+    try { const r = await genPosts(raw, "", "", mind, formats); setResult(r); }
+    catch(e) { setErr("Generation failed: " + e.message); }
+    finally { setLoading(false); }
+  };
+
+  const fillWeek = async () => {
+    setWeekLoading(true); setErr(""); setWeekDone(false);
+    try {
+      const r = await genWeekPosts(mind, formats);
+      if (r.posts) {
+        r.posts.forEach(p => addToQueue({content:p.content,hook:p.hook,platform:"LinkedIn",format:p.format}, {theme:p.theme,rationale:p.rationale}));
+        setWeekDone(true);
+        setTimeout(() => setPage("queue"), 1200);
+      }
+    } catch(e) { setErr("Fill My Week failed: " + e.message); }
+    finally { setWeekLoading(false); }
+  };
+
+  return (
+    <div>
+      <div className="card mb16">
+        <div className="ct">⊕ Generate
+          <div className="cta">
+            <button className="btn bv" onClick={fillWeek} disabled={weekLoading||weekDone}>
+              {weekLoading?<><span className="spin"/> Generating 5 posts...</>:weekDone?"✓ Added to Queue":"Fill My Week →"}
+            </button>
+          </div>
+        </div>
+        <div className="fg">
+          <label className="lbl">What's on your mind? <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— optional. Leave blank and AI picks the best topic from your Mind Bank.</span></label>
+          <textarea className="ta" style={{minHeight:150}} placeholder="Client conversation, rant, framework idea, observation... the messier the better. Or leave blank." value={raw} onChange={e=>setRaw(e.target.value)}/>
+        </div>
+        {assets.length>0&&<div className="fg">
+          <label className="lbl">Or load from library</label>
+          <select className="sel" onChange={e=>{const a=assets.find(a=>String(a.id)===e.target.value);if(a)setRaw(a.content||a.summary||"");}}>
+            <option value="">Select asset...</option>
+            {assets.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}
+          </select>
+        </div>}
+        <button className="btn bp w100" style={{padding:"12px 16px",fontSize:14}} onClick={generate} disabled={loading}>
+          {loading?<><span className="spin"/> Writing in Stephen's voice...</>:"Generate Post →"}
+        </button>
+      </div>
+      {err&&<div className="alert ar">{err}</div>}
+      {result&&(
+        <div>
+          <div className="alert as2 mb16">
+            <strong>{result.chosenTheme||"Theme selected"}</strong> · {result.chosenFormat||"Format auto-picked"}
+            {result.insights?.[0]&&<div style={{marginTop:6,fontSize:12,opacity:0.8}}>{result.insights[0]}</div>}
+          </div>
+          {result.variations?.map((v,i)=>(
+            <div key={i} className="card mb12">
+              <div className="f fac g8 mb10">
+                <span className="tag tb">{v.platform}</span>
+                {v.format&&<span className="tag ti">{v.format}</span>}
+                <div className="mla f g8">
+                  <CopyBtn text={v.content}/>
+                  <button className="btn bg bsm" onClick={()=>{addToQueue(v,{theme:result.chosenTheme,format:result.chosenFormat});setPage("queue");}}>Add to Queue →</button>
+                </div>
+              </div>
+              {v.hook&&<div style={{fontWeight:600,fontSize:13.5,marginBottom:8}}>{v.hook}</div>}
+              <div className="vt">{v.content}</div>
+            </div>
+          ))}
+          {result.suggestedABTest&&(
+            <div className="card" style={{borderColor:"rgba(92,75,138,0.35)"}}>
+              <div className="ct">⚗️ Suggested A/B Variant</div>
+              <div className="alert av mb12"><strong>Hypothesis:</strong> {result.suggestedABTest.hypothesis}</div>
+              {result.suggestedABTest.variantHook&&<div style={{fontWeight:600,marginBottom:8}}>{result.suggestedABTest.variantHook}</div>}
+              <div className="vt mb12">{result.suggestedABTest.variantContent}</div>
+              <div className="f g8">
+                <CopyBtn text={result.suggestedABTest.variantContent}/>
+                <button className="btn bv bsm" onClick={()=>{addToQueue({content:result.suggestedABTest.variantContent,hook:result.suggestedABTest.variantHook,platform:"LinkedIn",format:result.chosenFormat},{theme:result.chosenTheme});setPage("queue");}}>Add to Queue →</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
+  if (contentQueue.length === 0) {
+    return (
+      <div className="card" style={{textAlign:"center",padding:56}}>
+        <div style={{fontSize:34,marginBottom:12}}>▦</div>
+        <div className="serif" style={{fontSize:19,marginBottom:6}}>Queue is empty</div>
+        <div className="muted sm">Generate posts and add them here. When you're ready to go live, hit Copy & Post.</div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="alert ag mb16">
+        <strong>{contentQueue.length} post{contentQueue.length!==1?"s":""} queued.</strong> Hit Copy & Post when you're ready to go live — copies the content and creates a tracking entry automatically.
+      </div>
+      {contentQueue.map(item=>(
+        <div key={item.id} className="card mb12">
+          <div className="f fac g8 mb10">
+            <span className="tag tb">{item.platform}</span>
+            {item.theme&&<span className="tag tg">{item.theme}</span>}
+            {item.format&&<span className="tag ti">{item.format}</span>}
+            <span className="xs muted mla">{new Date(item.addedAt).toLocaleDateString("en-AU",{day:"numeric",month:"short"})}</span>
+          </div>
+          {item.hook&&<div style={{fontWeight:600,fontSize:13.5,marginBottom:8}}>{item.hook}</div>}
+          <div className="vt mb12" style={{maxHeight:200,overflow:"hidden",WebkitMaskImage:"linear-gradient(to bottom,black 70%,transparent)"}}>{item.content}</div>
+          {item.rationale&&<div className="xs muted mb12" style={{fontStyle:"italic"}}>Why now: {item.rationale}</div>}
+          <div className="f g8">
+            <button className="btn bg" onClick={()=>postFromQueue(item)}>Copy & Post →</button>
+            <CopyBtn text={item.content}/>
+            <button className="btn bgh bsm mla" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>Remove</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── SHELL ────────────────────────────────────────────────────────────────────
 const NAV = [
   {sec:"Core Loop"},
   {id:"dashboard",label:"Dashboard",icon:"◈"},
-  {id:"engine",label:"Content Engine",icon:"⊕"},
-  {id:"publish",label:"Publishing",icon:"↑"},
-  {id:"tracking",label:"Tracking",icon:"◉"},
+  {id:"generate",label:"Generate",icon:"⊕"},
+  {id:"queue",label:"Content Queue",icon:"▦",badge:"queue"},
+  {id:"tracking",label:"Live Posts",icon:"◉"},
   {sec:"Intelligence"},
   {id:"review",label:"Review Queue",icon:"◐",badge:"review"},
   {id:"report",label:"Weekly Report",icon:"📊"},
@@ -951,7 +1108,7 @@ const NAV = [
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
 
-const TITLES = {dashboard:"Dashboard",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Performance Tracking",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",input:"Content Library"};
+const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Live Posts",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",input:"Content Library"};
 
 export default function App() {
   const [page,setPage] = useState("dashboard");
@@ -963,8 +1120,51 @@ export default function App() {
   const [mind,setMind] = useState(SEED_MIND);
   const [formats,setFormats] = useState(SEED_FORMATS);
   const [reviewQueue,setReviewQueue] = useState(SEED_REVIEW);
-const [engineState,setEngineState] = useState({});
+  const [contentQueue,setContentQueue] = useState([]);
+  const [engineState,setEngineState] = useState({});
+
   const pending = reviewQueue.filter(r=>r.status==="ready").length;
+  const queueCount = contentQueue.length;
+
+  const addToQueue = (variation, meta={}) => {
+    setContentQueue(q=>[...q,{
+      id: Date.now()+Math.random(),
+      content: variation.content,
+      hook: variation.hook,
+      platform: variation.platform||"LinkedIn",
+      format: variation.format||meta.format||"",
+      theme: meta.theme||"",
+      rationale: meta.rationale||"",
+      addedAt: new Date().toISOString(),
+    }]);
+  };
+
+  const postFromQueue = (item) => {
+    navigator.clipboard.writeText(item.content).catch(()=>{});
+    const newPost = {
+      id: Date.now(),
+      title: item.hook?.slice(0,60)||item.content.split('\n')[0].slice(0,60),
+      date: new Date().toISOString().slice(0,10),
+      platform: item.platform,
+      status: "published",
+      content: item.content,
+      theme: item.theme,
+      format: item.format,
+      impressions: 0, engagement: 0, docViews: 0, calls: 0,
+      trackedLink: `bgb.co/p${Date.now().toString().slice(-4)}`,
+      url: "", isTest: false, testGroup: null, proven: false, daysLive: 0,
+    };
+    setPosts(p=>[newPost,...p]);
+    setContentQueue(q=>q.filter(qi=>qi.id!==item.id));
+    const due = new Date(); due.setDate(due.getDate()+7);
+    setReviewQueue(rq=>[...rq,{
+      id: Date.now()+1, postId: newPost.id, postTitle: newPost.title,
+      dueDate: due.toISOString().slice(0,10), status:"ready",
+      platform: newPost.platform, docViews:0, calls:0, impressions:0,
+      format: newPost.format, theme: newPost.theme, testGroup:null, aiProposal:null,
+    }]);
+  };
+
   return (
     <>
       <style>{STYLE}</style>
@@ -977,21 +1177,24 @@ const [engineState,setEngineState] = useState({});
               :<div key={n.id} className={`sb-item ${page===n.id?"active":""}`} onClick={()=>setPage(n.id)}>
                 <span className="ni">{n.icon}</span>{n.label}
                 {n.badge==="review"&&pending>0&&<span className="sb-badge">{pending}</span>}
+                {n.badge==="queue"&&queueCount>0&&<span className="sb-badge">{queueCount}</span>}
               </div>
             )}
           </nav>
-          <div className="sb-foot">Content → Post → Click<br/>→ Doc View → Call<br/>→ Learn → Repeat</div>
+          <div className="sb-foot">Generate → Queue → Post<br/>→ Track → Review<br/>→ Learn → Repeat</div>
         </aside>
         <main className="main">
           <div className="topbar">
-            <div className="tb-title">{TITLES[page]}</div>
+            <div className="tb-title">{TITLES[page]||page}</div>
             <div className="tb-meta">
               {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"long",year:"numeric"})}<br/>
               {formats.filter(f=>f.status==="proven").length} proven · {formats.filter(f=>f.status==="testing").length} testing · {mind.frameworks.length+mind.clientStories.length+mind.contrarian.length+mind.language.length} mind entries
             </div>
           </div>
           <div className="pg">
-            {page==="dashboard"&&<Dashboard posts={posts} formats={formats} reviewQueue={reviewQueue} setPage={setPage}/>}
+            {page==="dashboard"&&<Dashboard posts={posts} formats={formats} reviewQueue={reviewQueue} contentQueue={contentQueue} setPage={setPage} postFromQueue={postFromQueue}/>}
+            {page==="generate"&&<GeneratePage mind={mind} formats={formats} assets={assets} addToQueue={addToQueue} setPage={setPage}/>}
+            {page==="queue"&&<ContentQueuePage contentQueue={contentQueue} setContentQueue={setContentQueue} postFromQueue={postFromQueue}/>}
             {page==="engine"&&<ContentEngine assets={assets} posts={posts} setPosts={setPosts} formats={formats} mind={mind} setPage={setPage} engineState={engineState} setEngineState={setEngineState}/>}
             {page==="publish"&&<Publishing posts={posts} setPosts={setPosts} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
