@@ -294,6 +294,60 @@ async function analyzeAnalyticsImport(posts, mind, formats, bestPractice) {
   return JSON.parse(raw);
 }
 
+// ─── HISTORICAL ANALYSIS ─────────────────────────────────────────────────────
+function parseLinkedInCSV(text) {
+  // Robust CSV parser — handles quoted fields with embedded newlines
+  const parseRow = row => {
+    const fields = []; let field = ''; let inQ = false;
+    for (let i = 0; i < row.length; i++) {
+      const ch = row[i];
+      if (ch === '"') { if (inQ && row[i+1]==='"') { field+='"'; i++; } else { inQ=!inQ; } }
+      else if (ch === ',' && !inQ) { fields.push(field); field = ''; }
+      else { field += ch; }
+    }
+    fields.push(field); return fields;
+  };
+  // Split respecting quoted newlines
+  const rows = []; let cur = ''; let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') { inQ = !inQ; cur += ch; }
+    else if ((ch === '\n' || ch === '\r') && !inQ) { if (cur.trim()) rows.push(cur); cur = ''; if (ch==='\r'&&text[i+1]==='\n') i++; }
+    else { cur += ch; }
+  }
+  if (cur.trim()) rows.push(cur);
+  if (rows.length < 2) return [];
+  const headers = parseRow(rows[0]).map(h => h.trim().toLowerCase().replace(/[^a-z]/g,''));
+  const dateIdx = headers.findIndex(h => h.includes('date'));
+  const textIdx = headers.findIndex(h => h.includes('sharecommentary') || h.includes('commentary') || h.includes('text') || h.includes('content'));
+  const likeIdx = headers.findIndex(h => h.includes('like') || h.includes('reaction'));
+  const commentIdx = headers.findIndex(h => h.includes('comment'));
+  return rows.slice(1).map(line => {
+    const f = parseRow(line);
+    const t = (f[textIdx]||'').trim();
+    if (!t || t.length < 10) return null;
+    return {
+      date: (f[dateIdx]||'').trim().slice(0,10),
+      text: t,
+      likes: parseInt(f[likeIdx]||'0')||0,
+      comments: parseInt(f[commentIdx]||'0')||0,
+    };
+  }).filter(Boolean);
+}
+
+async function analyzeHistoricalPosts(posts, mind) {
+  // Sample intelligently: most recent 20 + spread across full history
+  const step = Math.max(1, Math.floor(posts.length / 40));
+  const sampled = posts.filter((_,i) => i < 20 || i % step === 0).slice(0, 60);
+  const dateRange = posts.length > 0 ? `${posts[posts.length-1].date?.slice(0,7)||'?'} → ${posts[0].date?.slice(0,7)||'?'}` : '';
+  const raw = await callClaude(
+    `You are the BGB Content Intelligence agent doing a deep historical analysis of ${posts.length} LinkedIn posts over ${dateRange}. Extract every pattern that reveals what Stephen has written best historically, what themes dominate, what hooks recur, and what's been underexplored.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"summary":{"totalPosts":${posts.length},"dateRange":"${dateRange}","dominantThemes":["..."],"writingEvolution":"2 sentences on how style/topics evolved over time","overallStrength":"2 sentences on what Stephen does consistently well"},"topThemes":[{"theme":"...","postCount":0,"engagementLevel":"high|medium|low","bestHook":"first line of the best post on this theme"}],"hookPatterns":[{"pattern":"describe the structural hook type","frequency":0,"example":"verbatim first line example","strength":"strong|medium|weak"}],"styleInsights":["specific observations about sentence structure, rhythm, vocabulary, length"],"underusedAngles":["high-potential angles not yet explored but aligned with BGB positioning and GM install offer"],"newPatterns":[{"title":"...","category":"hook|format|theme|engagement","platform":"LinkedIn","pattern":"reusable technique","whyItWorks":"..."}]}`,
+    `${sampled.length} posts sampled from ${posts.length} total LinkedIn posts:\n\n${sampled.map(p=>`[${p.date}${p.likes?` · ${p.likes} likes`:''}${p.comments?` · ${p.comments} comments`:''}]\n${p.text.slice(0,400)}`).join('\n\n---\n\n')}`,
+    4000
+  );
+  return JSON.parse(raw);
+}
+
 async function researchBestPractices(platform, mind) {
   const raw = await callClaude(
     `You are a content strategy researcher specialising in the SME/business coaching niche on social media. You know what patterns drive engagement, saves, and conversions for coaches targeting $1M–$5M business owners.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"patterns":[{"title":"...","category":"hook|format|theme|engagement","platform":"LinkedIn|Instagram|Both","pattern":"the reusable structural technique","example":"brief example","whyItWorks":"why this converts for SME owners"}]} — return exactly 5 patterns.`,
@@ -1100,6 +1154,12 @@ function AnalyticsImport({ data, setData, igData, setIgData, mind, formats, best
   const [err, setErr] = useState('');
   const [patternSaved, setPatternSaved] = useState(false);
   const [metricsSaved, setMetricsSaved] = useState(false);
+  // History tab state
+  const [histPosts, setHistPosts] = useState(null);
+  const [histAnalysis, setHistAnalysis] = useState(null);
+  const [histLoading, setHistLoading] = useState(false);
+  const [histErr, setHistErr] = useState('');
+  const [histPatternsSaved, setHistPatternsSaved] = useState(false);
 
   const saveIgToken = t => { setIgToken(t); localStorage.setItem('bgb_ig_token', t); };
   const switchPlatform = p => { setPlatform(p); setAnalysis(null); setErr(''); };
@@ -1194,6 +1254,9 @@ function AnalyticsImport({ data, setData, igData, setIgData, mind, formats, best
         </div>
         <div className={`tab ${platform==='instagram'?'active':''}`} onClick={()=>switchPlatform('instagram')}>
           ▣&nbsp; Instagram {igData&&<span style={{marginLeft:5,color:'var(--sage)',fontSize:9}}>●</span>}
+        </div>
+        <div className={`tab ${platform==='history'?'active':''}`} onClick={()=>switchPlatform('history')}>
+          ◎&nbsp; Post History {histPosts&&<span style={{marginLeft:5,color:'var(--sage)',fontSize:9}}>●</span>}
         </div>
       </div>
 
@@ -1293,6 +1356,154 @@ function AnalyticsImport({ data, setData, igData, setIgData, mind, formats, best
               <div className="serif" style={{fontSize:16,marginBottom:8}}>Ready to pull</div>
               <div className="muted sm">Click "Pull Instagram" above to fetch your last 7 days of posts with impressions, reach and saves.</div>
             </div>
+          )}
+        </>
+      )}
+
+      {/* ── HISTORY ── */}
+      {platform === 'history' && (
+        <>
+          <div className="alert ag mb16">
+            <strong>Analyse your full LinkedIn post history</strong> — up to 3 years of posts in one shot. Claude maps your dominant themes, recurring hooks, writing style, and what's been left on the table.
+          </div>
+
+          {/* Export instructions */}
+          <div className="card mb16">
+            <div className="ct">📦 Step 1 — Download your LinkedIn data</div>
+            <div style={{lineHeight:2.1,fontSize:13}}>
+              1. Go to LinkedIn → <strong>Settings &amp; Privacy → Data Privacy</strong><br/>
+              2. Click <strong>"Get a copy of your data"</strong><br/>
+              3. Select <strong>Posts</strong> only (arrives in ~10 minutes)<br/>
+              4. Download the ZIP, unzip it, find <strong>Shares.csv</strong>
+            </div>
+          </div>
+
+          {/* File upload */}
+          <div className="card mb16">
+            <div className="ct">📂 Step 2 — Upload Shares.csv</div>
+            <div className="fg">
+              <label className="lbl">Select your Shares.csv file</label>
+              <input type="file" accept=".csv,.zip" style={{fontSize:13,padding:'8px 0'}} onChange={e=>{
+                const file = e.target.files?.[0]; if(!file) return;
+                const reader = new FileReader();
+                reader.onload = ev => {
+                  const text = ev.target.result;
+                  const parsed = parseLinkedInCSV(text);
+                  if (parsed.length === 0) { setHistErr('Could not parse file. Make sure it is Shares.csv from LinkedIn data export.'); return; }
+                  setHistPosts(parsed); setHistErr(''); setHistAnalysis(null);
+                };
+                reader.readAsText(file);
+              }}/>
+            </div>
+            {histErr&&<div className="alert ar mt8">{histErr}</div>}
+            {histPosts&&(
+              <div className="alert as2 mt8">
+                <strong>✓ {histPosts.length} posts loaded</strong> — {histPosts[histPosts.length-1]?.date?.slice(0,7)||'?'} to {histPosts[0]?.date?.slice(0,7)||'?'}
+                {histPosts.some(p=>p.likes>0)&&<span> · engagement data included</span>}
+              </div>
+            )}
+          </div>
+
+          {/* Analyse button */}
+          {histPosts&&(
+            <div className="card mb16">
+              <div className="ct">🧠 Step 3 — Run Historical Analysis</div>
+              <div className="muted sm mb12">Claude will sample across your full history, map themes, extract hook patterns, identify your writing style fingerprint, and surface angles you haven't explored yet.</div>
+              <div className="f fac g12">
+                <button className="btn bg" onClick={async()=>{
+                  setHistLoading(true); setHistErr('');
+                  try { const r = await analyzeHistoricalPosts(histPosts, mind); setHistAnalysis(r); }
+                  catch(e) { setHistErr('Analysis failed: '+e.message); }
+                  finally { setHistLoading(false); }
+                }} disabled={histLoading}>
+                  {histLoading?<><span className="spin"/> Analysing {histPosts.length} posts...</>:'Run Historical Analysis →'}
+                </button>
+                {histAnalysis&&<button className={`btn bsm ${histPatternsSaved?'bsa':'bv'}`} onClick={()=>{
+                  if(!histAnalysis.newPatterns?.length) return;
+                  setBestPractice(prev=>[...prev,...histAnalysis.newPatterns.map((p,i)=>({...p,id:Date.now()+i,source:'history-analysis',addedDate:new Date().toISOString().slice(0,10)}))]);
+                  setHistPatternsSaved(true); setTimeout(()=>setHistPatternsSaved(false),2500);
+                }}>{histPatternsSaved?`✓ ${histAnalysis.newPatterns?.length} Patterns Saved`:`+ Add ${histAnalysis.newPatterns?.length||0} Patterns to KB`}</button>}
+              </div>
+              {histErr&&<div className="alert ar mt12">{histErr}</div>}
+            </div>
+          )}
+
+          {/* Results */}
+          {histAnalysis&&(
+            <>
+              <div className="card mb16">
+                <div className="ct">📊 Historical Intelligence Report</div>
+                <div className="g2 mb16">
+                  <div><div className="xs muted mb4">Overall Strength</div><div className="sm">{histAnalysis.summary?.overallStrength}</div></div>
+                  <div><div className="xs muted mb4">Writing Evolution</div><div className="sm">{histAnalysis.summary?.writingEvolution}</div></div>
+                </div>
+                {histAnalysis.summary?.dominantThemes?.length>0&&(
+                  <div className="mb12"><div className="xs muted mb6">Dominant Themes</div><div className="f fw g4x">{histAnalysis.summary.dominantThemes.map((t,i)=><span key={i} className="tag tg">{t}</span>)}</div></div>
+                )}
+                {histAnalysis.styleInsights?.length>0&&(
+                  <div><div className="xs muted mb6">Style Insights</div>{histAnalysis.styleInsights.map((s,i)=><div key={i} className="f g8 mb4"><span style={{color:'var(--gold)',fontWeight:700}}>→</span><span className="sm">{s}</span></div>)}</div>
+                )}
+              </div>
+
+              {histAnalysis.topThemes?.length>0&&(
+                <div className="card mb16">
+                  <div className="ct">🏷️ Theme Map</div>
+                  <table><thead><tr><th>Theme</th><th>Posts</th><th>Engagement</th><th>Best Hook</th></tr></thead>
+                  <tbody>{histAnalysis.topThemes.map((t,i)=>(
+                    <tr key={i}>
+                      <td style={{fontWeight:600}}>{t.theme}</td>
+                      <td><span className="xs mono">{t.postCount||'—'}</span></td>
+                      <td><span className={`tag ${t.engagementLevel==='high'?'ts':t.engagementLevel==='medium'?'tg':'tr'}`}>{t.engagementLevel}</span></td>
+                      <td style={{fontSize:12,color:'var(--ink60)',maxWidth:220}}>{t.bestHook}</td>
+                    </tr>
+                  ))}</tbody></table>
+                </div>
+              )}
+
+              {histAnalysis.hookPatterns?.length>0&&(
+                <div className="card mb16">
+                  <div className="ct">🪝 Hook Patterns</div>
+                  {histAnalysis.hookPatterns.map((h,i)=>(
+                    <div key={i} className="kbi">
+                      <div className="kbih">
+                        <div style={{flex:1}}>
+                          <div className="f fac g8 mb4">
+                            <span className={`tag ${h.strength==='strong'?'ts':h.strength==='medium'?'tg':'tr'}`}>{h.strength}</span>
+                            <span className="xs muted">used ~{h.frequency||'?'}x</span>
+                          </div>
+                          <div className="kbit">{h.pattern}</div>
+                          {h.example&&<div className="kbib mt4" style={{fontStyle:'italic'}}>"{h.example}"</div>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {histAnalysis.underusedAngles?.length>0&&(
+                <div className="card mb16">
+                  <div className="ct">💡 Underused Angles — Untapped Potential</div>
+                  <div className="alert av mb12">These angles are aligned with your BGB positioning but don't appear much in your history. High-opportunity gaps.</div>
+                  {histAnalysis.underusedAngles.map((a,i)=><div key={i} className="f g8 mb8"><span style={{color:'var(--violet)',fontWeight:700}}>◆</span><span className="sm">{a}</span></div>)}
+                </div>
+              )}
+
+              {histAnalysis.newPatterns?.length>0&&(
+                <div className="card">
+                  <div className="ct">🧬 Extracted Patterns ({histAnalysis.newPatterns.length})</div>
+                  <div className="muted sm mb12">Patterns derived from what you've done well historically. Click "Add to KB" above to inject them into every future generation call.</div>
+                  {histAnalysis.newPatterns.map((p,i)=>(
+                    <div key={i} className="kbi">
+                      <div className="kbih"><div style={{flex:1}}>
+                        <div className="f fac g8 mb4"><span className={`tag ${({hook:'tr',format:'tb',theme:'tg',engagement:'tv'})[p.category]||'ti'}`}>{p.category}</span><span className="kbit">{p.title}</span></div>
+                        <div className="kbib">{p.pattern}</div>
+                        {p.whyItWorks&&<div className="xs muted mt4">→ {p.whyItWorks}</div>}
+                      </div></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
