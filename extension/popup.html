@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BGB Content Intelligence</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">BGB</div>
+    <div class="subtitle">CONTENT INTELLIGENCE</div>
+  </div>
+
+  <div class="content">
+    <div class="section">
+      <div class="section-label">PULL ANALYTICS</div>
+      <div class="platform-row">
+        <button id="btn-linkedin" class="btn-primary">
+          <span class="platform-icon">in</span>
+          Pull LinkedIn
+        </button>
+        <button class="btn-soon" disabled>
+          <span class="platform-icon">📷</span>
+          Instagram
+          <span class="soon-tag">soon</span>
+        </button>
+      </div>
+      <div id="status-bar" class="status-bar"></div>
+      <div id="progress-wrap" class="progress-wrap" style="display:none">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+    </div>
+
+    <div id="import-section" class="section" style="display:none">
+      <div class="section-label">LAST IMPORT</div>
+      <div id="import-summary" class="import-summary"></div>
+      <button id="btn-send" class="btn-gold">Send to BGB App →</button>
+      <button id="btn-clear" class="btn-ghost">Clear</button>
+    </div>
+
+    <div id="empty-state" class="empty-state">
+      Click "Pull LinkedIn" to import your<br>last 7 days of post analytics.
+    </div>
+  </div>
+
+  <div class="footer">Content → Post → Click → Doc View → Call → Learn</div>
+  <script src="popup.js"></script>
+</body>
+</html>

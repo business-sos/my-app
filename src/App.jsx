@@ -186,6 +186,14 @@ const SEED_REVIEW = [
   { id:2, postId:4, postTitle:"What 18 months watching founders taught me", dueDate:"2025-06-26", status:"ready", platform:"LinkedIn", docViews:19, calls:1, impressions:3100, format:"Observation + Principle", theme:"Delegation Ladder", testGroup:"B", aiProposal:null },
 ];
 
+const SEED_BESTPRACTICE = [
+  { id:1, platform:"LinkedIn", category:"hook", title:"The Specific Failure Hook", pattern:"Open with a named, concrete failure the reader has already lived. No setup. No 'most people'. Just the exact moment they recognise.", example:"Your business grew because you were good at the work.\n\nNow you're trapped in the work because you're too good at it.", whyItWorks:"Specific failure creates instant recognition. The reader feels seen before you've sold anything. Stops the scroll because it sounds like their internal monologue.", source:"manual", addedDate:"2025-06-01" },
+  { id:2, platform:"LinkedIn", category:"format", title:"One Idea Per Line, No Bullet Lists", pattern:"Each sentence stands alone on its own line. No bullet points, no numbered lists. Prose only. Maximum 2 sentences per paragraph block. Short paragraphs separated by a blank line.", example:"The fix isn't working harder. It's not another system.\n\nIt's a GM.", whyItWorks:"Short lines create white space that forces the reader to pause. Each line lands like a punctuation mark. Bullets signal 'content'. Prose signals 'person'.", source:"manual", addedDate:"2025-06-01" },
+  { id:3, platform:"Both", category:"theme", title:"Proprietary Problem Naming", pattern:"Name the invisible constraint the owner is living inside. Give it a proper noun (The Founder Trap, The $5M Ceiling). Describe why it feels like success even as it limits them.", example:"I call it the Founder Trap.\n\nYou built the thing. You ARE the thing.", whyItWorks:"Naming a problem the reader hadn't articulated creates the feeling that you understand them better than they understand themselves. Proprietary names are memorable and shareable.", source:"manual", addedDate:"2025-06-02" },
+  { id:4, platform:"LinkedIn", category:"engagement", title:"The Earned Contrarian Close", pattern:"End with a 1–2 line conclusion that contradicts the expected advice. The close must be earned by the logic of the post — not dropped in. No question. No CTA. Just the principle.", example:"The discomfort is the point. Lean into it.", whyItWorks:"Contrarian closes trigger comments from people who agree and disagree equally. Both camps share the post. The lack of a question makes it feel like a conviction, not a prompt.", source:"manual", addedDate:"2025-06-03" },
+  { id:5, platform:"Instagram", category:"format", title:"Framework-as-Visual Prompt", pattern:"Name a framework in the first line. Give it a number (rungs, steps, phases). Describe each level in one sentence. End with where the reader is stuck right now.", example:"Draw your org chart.\n\nNow put your name everywhere it appears.\n\nThat's the problem.", whyItWorks:"Numbered frameworks are saved and shared because they feel like tools, not opinions. Instagram audiences respond to visual structure even in plain text. The final diagnosis triggers saves.", source:"manual", addedDate:"2025-06-04" },
+];
+
 // ─── AI ───────────────────────────────────────────────────────────────────────
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 
@@ -220,7 +228,21 @@ function fmtCtx(formats) {
   return p.length ? "PROVEN FORMATS: "+p.map(f=>`${f.name}: ${f.description}`).join(" | ") : "";
 }
 
-async function genPosts(raw, theme, fmt, mind, formats) {
+function bpCtx(bp) {
+  if(!bp||bp.length===0) return "";
+  const hooks=bp.filter(b=>b.category==="hook");
+  const fmts=bp.filter(b=>b.category==="format");
+  const themes=bp.filter(b=>b.category==="theme");
+  const eng=bp.filter(b=>b.category==="engagement");
+  const parts=[];
+  if(hooks.length) parts.push("BEST PRACTICE HOOKS: "+hooks.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  if(fmts.length) parts.push("BEST PRACTICE FORMATS: "+fmts.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  if(themes.length) parts.push("BEST PRACTICE THEMES: "+themes.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  if(eng.length) parts.push("BEST PRACTICE ENGAGEMENT: "+eng.map(b=>`${b.title}: ${b.pattern}`).join(" | "));
+  return parts.length?"INTERNET BEST PRACTICES (use to inform structure/hooks, always filtered through Stephen's voice):\n"+parts.join("\n"):"";
+}
+
+async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[]) {
   const raw2 = await callClaude(
     `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\nIf no theme or format is specified, auto-pick the best ones from the knowledge banks. Return ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \\n for line breaks in content. Format: {"chosenTheme":"...","chosenFormat":"...","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\\nline2\\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
     `Raw input:\n${raw||"Pick the most compelling BGB topic right now based on the knowledge banks."}\n\nTheme: ${theme||"auto-pick best"}\nFormat: ${fmt||"auto-pick best"}`,
@@ -272,6 +294,39 @@ function CopyBtn({ text, label="Copy" }) {
 function Score({ v }) {
   const col = v>=70?"var(--sage)":v>=45?"var(--gold)":"var(--rust)";
   return <div className="sb2"><div className="st"><div className="sf" style={{width:`${v}%`,background:col}}/></div><span className="xs" style={{color:col,minWidth:26}}>{v}</span></div>;
+}
+
+function PostRow({ post, analysis }) {
+  const verdictCol={strong:"ts",average:"tg",weak:"tr"};
+  const typeCol={video:"tv",image:"tb",document:"tprov",carousel:"tg",text:"ti"};
+  const pa = analysis?.postAnalyses?.find(a=>a.id===post.id) || (post.verdict?post:null);
+  return (
+    <div className="li">
+      <div className="libody">
+        <div className="f fac g8 mb6">
+          <span className={`tag ${typeCol[post.postType]||"ti"}`}>{post.postType||"text"}</span>
+          {pa&&<span className={`tag ${verdictCol[pa.verdict]||"ti"}`}>{pa.verdict}</span>}
+          {pa?.matchedPattern&&<span className="tag tprov">↔ {pa.matchedPattern}</span>}
+          {pa?.hookScore!=null&&<span className="xs muted">Hook {pa.hookScore}/100</span>}
+          {pa?.saveSignal&&pa.saveSignal!=="low"&&<span className={`tag ${pa.saveSignal==="high"?"ts":"tg"}`}>{pa.saveSignal} saves</span>}
+        </div>
+        <div className="lititle">{post.hook||"(no hook)"}</div>
+        {post.text&&post.text!==post.hook&&<div className="liprev">{post.text}</div>}
+        <div className="limetrics mt6">
+          <span className="mp"><strong>{(post.impressions||0).toLocaleString()}</strong> imp</span>
+          {post.reach>0&&<span className="mp"><strong>{post.reach.toLocaleString()}</strong> reach</span>}
+          {post.saves>0&&<span className="mp hl"><strong>{post.saves}</strong> saves</span>}
+          <span className="mp"><strong>{post.reactions||0}</strong> likes</span>
+          <span className="mp"><strong>{post.comments||0}</strong> comments</span>
+          {post.reposts>0&&<span className="mp"><strong>{post.reposts}</strong> reposts</span>}
+          {post.clicks>0&&<span className="mp hl"><strong>{post.clicks}</strong> clicks</span>}
+          {post.engagementRate&&<span className="mp"><strong>{post.engagementRate}%</strong> eng</span>}
+        </div>
+        {pa&&<div className="rp mt8"><div className="sm mb4">{pa.whyWorked}</div><div className="xs" style={{color:"var(--violet)"}}>→ {pa.recommendation}</div></div>}
+        {post.url&&<div className="mt8"><a href={post.url} target="_blank" rel="noreferrer" className="btn bo bsm">View post ↗</a></div>}
+      </div>
+    </div>
+  );
 }
 
 // ─── VIEWS ────────────────────────────────────────────────────────────────────
@@ -561,7 +616,7 @@ function ReviewQueue({ posts, setPosts, formats, setFormats, reviewQueue, setRev
   );
 }
 
-function ContentEngine({ assets, posts, setPosts, formats, mind, setPage }) {
+function ContentEngine({ assets, posts, setPosts, formats, mind, setPage, engineState, setEngineState, bestPractice=[] }) {
   const [step,setStep] = useState(0);
   const [raw,setRaw] = useState(""); const [theme,setTheme] = useState("Delegation Ladder"); const [fmt,setFmt] = useState("");
   const [loading,setLoading] = useState(false); const [err,setErr] = useState(""); const [result,setResult] = useState(null);
@@ -571,7 +626,7 @@ function ContentEngine({ assets, posts, setPosts, formats, mind, setPage }) {
   const generate = async () => {
     if(!raw.trim()) return;
     setLoading(true); setErr(""); setStep(1);
-    try { const r=await genPosts(raw,theme,fmt,mind,formats); setResult(r); setStep(2); }
+    try { const r=await genPosts(raw,theme,fmt,mind,formats,bestPractice); setResult(r); setStep(2); }
     catch(e){setErr("Generation failed: "+e.message);setStep(0);}
     finally{setLoading(false);}
   };
@@ -1331,12 +1386,14 @@ const NAV = [
   {id:"queue",label:"Content Queue",icon:"▦",badge:"queue"},
   {id:"tracking",label:"Live Posts",icon:"◉"},
   {sec:"Intelligence"},
+  {id:"analytics",label:"Analytics Import",icon:"📥",badge:"analytics"},
   {id:"review",label:"Review Queue",icon:"◐",badge:"review"},
   {id:"report",label:"Weekly Report",icon:"📊"},
   {id:"analytics",label:"Analytics",icon:"📈"},
   {sec:"Knowledge Banks"},
   {id:"mind",label:"Your Mind",icon:"🧠"},
   {id:"whatworks",label:"What Works",icon:"✦"},
+  {id:"bestpractice",label:"Best Practices",icon:"🌐"},
   {sec:"Library"},
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
@@ -1431,11 +1488,13 @@ export default function App() {
             {page==="engine"&&<ContentEngine assets={assets} posts={posts} setPosts={setPosts} formats={formats} mind={mind} setPage={setPage} engineState={engineState} setEngineState={setEngineState}/>}
             {page==="publish"&&<Publishing posts={posts} setPosts={setPosts} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
+            {page==="analytics"&&<AnalyticsImport data={analyticsImport} setData={setAnalyticsImport} igData={instagramImport} setIgData={setInstagramImport} mind={mind} formats={formats} bestPractice={bestPractice} setBestPractice={setBestPractice} posts={posts} setPosts={setPosts} setPage={setPage}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
             {page==="analytics"&&<AnalyticsPage mind={mind} setMind={setMind} formats={formats}/>}
             {page==="mind"&&<MyMind mind={mind} setMind={setMind}/>}
             {page==="whatworks"&&<WhatWorksBank formats={formats} setFormats={setFormats} mind={mind}/>}
+            {page==="bestpractice"&&<BestPracticeBank bestPractice={bestPractice} setBestPractice={setBestPractice} mind={mind}/>}
             {page==="input"&&<ContentLibrary assets={assets} setAssets={setAssets}/>}
           </div>
         </main>
