@@ -181,6 +181,26 @@ const SEED_MIND = {
   ],
 };
 
+const SEED_WRITING_RULES = `NEVER DO THIS:
+- Never use bullet points or numbered lists in post content
+- Never use em dashes (—) as a stylistic crutch
+- Never open with a question ("Have you ever...?", "What if I told you...?")
+- Never use: leverage, synergies, game-changer, crush it, hustle, grind, unlock, skyrocket, double down, at the end of the day
+- Never use motivational fluff or empty encouragement ("You've got this", "Believe in yourself")
+- Never use passive voice ("It has been found that...", "Mistakes were made")
+- Never end with a generic CTA ("Let me know in the comments", "Drop a like if you agree")
+- Never use corporate jargon or consultant-speak
+- Never write more than one idea per sentence on LinkedIn
+- Never use more than 3 hashtags
+
+ALWAYS DO THIS:
+- Use specific numbers ($3.2M not "a few million", 90 days not "a few months")
+- Short sentences. One idea per line on LinkedIn.
+- Write in Stephen's direct, unimpressed voice — no hype
+- End with a 1–2 line punch, not a question
+- Reference real outcomes from real clients where possible
+- Make the first line do all the work — it determines whether anyone reads on`;
+
 const SEED_REVIEW = [
   { id:1, postId:3, postTitle:"The $500K mistake hidden in your org chart", dueDate:"2025-06-27", status:"ready", platform:"Instagram", docViews:8, calls:0, impressions:1900, format:"Framework Drop", theme:"Owner Freedom", testGroup:"A", aiProposal:null },
   { id:2, postId:4, postTitle:"What 18 months watching founders taught me", dueDate:"2025-06-26", status:"ready", platform:"LinkedIn", docViews:19, calls:1, impressions:3100, format:"Observation + Principle", theme:"Delegation Ladder", testGroup:"B", aiProposal:null },
@@ -214,13 +234,13 @@ async function callClaude(sys, user, maxTokens=2000) {
   const raw=d.content.map(b=>b.text||"").join("");const match=raw.match(/\{[\s\S]*\}/);if(!match)throw new Error("No JSON found");return match[0];
 }
 
-function voiceCtx(mind) {
+function voiceCtx(mind, rules) {
   return `STEPHEN'S VOICE:
 Frameworks: ${mind.frameworks.map(f=>f.title+": "+f.body).join(" | ")}
 Client stories: ${mind.clientStories.map(s=>s.title+": "+s.body).join(" | ")}
 Contrarian takes: ${mind.contrarian.map(c=>c.title+": "+c.body).join(" | ")}
 Language: ${mind.language.map(l=>l.body).join(" | ")}
-NEVER: corporate jargon, bullet lists. Short sentences. Specific numbers. Direct.`;
+${rules?`\nWRITING RULES — MUST FOLLOW:\n${rules}`:"NEVER: corporate jargon, bullet lists. Short sentences. Specific numbers. Direct."}`;
 }
 
 function fmtCtx(formats) {
@@ -242,18 +262,18 @@ function bpCtx(bp) {
   return parts.length?"INTERNET BEST PRACTICES (use to inform structure/hooks, always filtered through Stephen's voice):\n"+parts.join("\n"):"";
 }
 
-async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[]) {
+async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[], writingRules="") {
   const raw2 = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nIf no theme/format specified, pick the best ones from the knowledge banks. Return ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nIf no theme/format specified, pick the best ones from the knowledge banks. Return ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
     `Raw input:\n${raw||"Pick the most compelling BGB topic right now based on the knowledge banks."}\n\nTheme: ${theme||"auto-pick best"}\nFormat: ${fmt||"auto-pick best"}`,
     3000
   );
   return JSON.parse(raw2);
 }
 
-async function genWeekPosts(mind, formats, bestPractice) {
+async function genWeekPosts(mind, formats, writingRules="") {
   const raw = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
     `Generate 5 varied LinkedIn posts for the week. Cover different angles of the BGB positioning — delegation, GM install, owner freedom, founder trap, scaling. Mix proven and testing formats.`,
     4000
   );
@@ -1601,7 +1621,7 @@ function AnalyticsPage({ mind, setMind, formats }) {
   );
 }
 
-function GeneratePage({ mind, formats, assets, addToQueue, setPage }) {
+function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules="" }) {
   const [raw, setRaw] = useState("");
   const [loading, setLoading] = useState(false);
   const [weekLoading, setWeekLoading] = useState(false);
@@ -1611,7 +1631,7 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage }) {
 
   const generate = async () => {
     setLoading(true); setErr(""); setResult(null);
-    try { const r = await genPosts(raw, "", "", mind, formats); setResult(r); }
+    try { const r = await genPosts(raw, "", "", mind, formats, [], writingRules); setResult(r); }
     catch(e) { setErr("Generation failed: " + e.message); }
     finally { setLoading(false); }
   };
@@ -1619,7 +1639,7 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage }) {
   const fillWeek = async () => {
     setWeekLoading(true); setErr(""); setWeekDone(false);
     try {
-      const r = await genWeekPosts(mind, formats);
+      const r = await genWeekPosts(mind, formats, writingRules);
       if (r.posts) {
         r.posts.forEach(p => addToQueue({content:p.content,hook:p.hook,platform:"LinkedIn",format:p.format}, {theme:p.theme,rationale:p.rationale}));
         setWeekDone(true);
@@ -1731,6 +1751,55 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
 }
 
 // ─── SHELL ────────────────────────────────────────────────────────────────────
+function WritingRulesPage({ rules, setRules }) {
+  const [draft, setDraft] = useState(rules);
+  const [saved, setSaved] = useState(false);
+  const save = () => { setRules(draft); setSaved(true); setTimeout(()=>setSaved(false), 2000); };
+  const reset = () => { setDraft(SEED_WRITING_RULES); };
+  return (
+    <div>
+      <div className="alert ar mb20">
+        <strong>Writing Rules</strong> — injected into every generation call. The AI reads this before writing a single word. Be specific — vague rules get ignored. The more precise, the better the output.
+      </div>
+      <div className="card">
+        <div className="ct">✍️ Your Writing Rules
+          <div className="cta">
+            <button className="btn bo bsm" onClick={reset}>Reset to defaults</button>
+            <button className={`btn bsm ${saved?"bsa":"bp"}`} onClick={save}>{saved?"✓ Saved — AI will use these now":"Save Rules →"}</button>
+          </div>
+        </div>
+        <div className="alert ag mb16" style={{fontSize:12}}>
+          Write in plain English. Use NEVER DO THIS and ALWAYS DO THIS sections. Be as specific as possible — name exact phrases, patterns, and structures. These rules override everything else.
+        </div>
+        <textarea
+          className="ta"
+          style={{minHeight:520, fontFamily:"'DM Mono',monospace", fontSize:12.5, lineHeight:1.8}}
+          value={draft}
+          onChange={e=>setDraft(e.target.value)}
+        />
+        <div className="f fac g12 mt16">
+          <button className={`btn ${saved?"bsa":"bp"}`} onClick={save}>{saved?"✓ Saved":"Save Rules →"}</button>
+          <span className="xs muted">These rules are injected into every Generate, Fill My Week, and Weekly Report call.</span>
+        </div>
+      </div>
+      <div className="card mt16">
+        <div className="ct">💡 Tips for writing effective rules</div>
+        {[
+          ["Be specific, not vague","❌ 'Don't be boring' → ✓ 'Never open with a rhetorical question'"],
+          ["Name exact phrases to avoid","❌ 'Avoid jargon' → ✓ 'Never use: leverage, unlock, game-changer, crush it'"],
+          ["Describe structure, not just tone","✓ 'End every post with a 1–2 line standalone punch. Never a question.'"],
+          ["Add rules as you spot bad habits","When the AI writes something that feels off, add a rule that prevents it"],
+        ].map(([title,desc],i)=>(
+          <div key={i} className="li">
+            <div style={{width:20,flexShrink:0,color:"var(--gold)",fontWeight:700}}>→</div>
+            <div className="libody"><div className="lititle" style={{fontSize:13}}>{title}</div><div className="xs muted mt4">{desc}</div></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const NAV = [
   {sec:"Core Loop"},
   {id:"dashboard",label:"Dashboard",icon:"◈"},
@@ -1746,12 +1815,13 @@ const NAV = [
   {sec:"Knowledge Banks"},
   {id:"mind",label:"Your Mind",icon:"🧠"},
   {id:"whatworks",label:"What Works",icon:"✦"},
+  {id:"rules",label:"Writing Rules",icon:"🚫"},
   {id:"bestpractice",label:"Best Practices",icon:"🌐"},
   {sec:"Library"},
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
 
-const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",tracking:"Live Posts",analytics:"Analytics Import",dna:"Content DNA",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
+const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",tracking:"Live Posts",analytics:"Analytics Import",dna:"Content DNA",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",rules:"Writing Rules",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
 
 export default function App() {
   const [page,setPage] = useState("dashboard");
@@ -1761,6 +1831,7 @@ export default function App() {
     {id:2,type:"notes",title:"The Delegation Ladder — full framework",date:"2025-05-30",content:"5 rungs. Most owners jump from rung 1 to 5 and wonder why it fails. Rung 2 requires written process. Rung 3 requires weekly check-in. The key: the ladder isn't about trust. It's about documentation.",summary:"Full notes on the Delegation Ladder — all 5 rungs with examples.",tags:["delegation","framework"]},
   ]);
   const [mind,setMind] = useState(SEED_MIND);
+  const [writingRules,setWritingRules] = useState(SEED_WRITING_RULES);
   const [formats,setFormats] = useState(SEED_FORMATS);
   const [reviewQueue,setReviewQueue] = useState(SEED_REVIEW);
   const [bestPractice,setBestPractice] = useState(SEED_BESTPRACTICE);
@@ -1850,9 +1921,9 @@ export default function App() {
           </div>
           <div className="pg">
             {page==="dashboard"&&<Dashboard posts={posts} formats={formats} reviewQueue={reviewQueue} contentQueue={contentQueue} setPage={setPage} postFromQueue={postFromQueue}/>}
-            {page==="generate"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage}/>}
+            {page==="generate"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage} writingRules={writingRules}/>}
             {page==="queue"&&<ContentQueuePage contentQueue={contentQueue} setContentQueue={setContentQueue} postFromQueue={postFromQueue}/>}
-            {page==="engine"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage}/>}
+            {page==="engine"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage} writingRules={writingRules}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
             {page==="analytics"&&<AnalyticsPage mind={mind} setMind={setMind} formats={formats}/>}
             {page==="dna"&&<ContentDNAPage mind={mind} setMind={setMind} formats={formats} setFormats={setFormats}/>}
@@ -1860,6 +1931,7 @@ export default function App() {
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
             {page==="mind"&&<MyMind mind={mind} setMind={setMind}/>}
             {page==="whatworks"&&<WhatWorksBank formats={formats} setFormats={setFormats} mind={mind}/>}
+            {page==="rules"&&<WritingRulesPage rules={writingRules} setRules={setWritingRules}/>}
             {page==="bestpractice"&&<BestPracticeBank bestPractice={bestPractice} setBestPractice={setBestPractice} mind={mind}/>}
             {page==="input"&&<ContentLibrary assets={assets} setAssets={setAssets}/>}
           </div>
