@@ -1094,54 +1094,73 @@ function parseLinkedInCSV(text) {
 }
 
 // ─── CONTENT DNA ─────────────────────────────────────────────────────────────
+// Sanitise post text before sending to Claude — strips chars that break JSON
+function sanitiseForPrompt(str, maxLen=350) {
+  return (str||"").slice(0,maxLen).replace(/[\u0000-\u001F\u007F]/g," ").replace(/\\/g," ").replace(/"/g,"'");
+}
+
+// Robust JSON parser — handles minor formatting issues in Claude responses
+function parseJSON(raw) {
+  // Try direct parse first
+  try { return JSON.parse(raw); } catch(_) {}
+  // Try extracting largest JSON object
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (match) { try { return JSON.parse(match[0]); } catch(_) {} }
+  // Last resort: strip control chars and retry
+  const cleaned = raw.replace(/[\u0000-\u001F\u007F]/g," ");
+  const match2 = cleaned.match(/\{[\s\S]*\}/);
+  if (match2) { try { return JSON.parse(match2[0]); } catch(_) {} }
+  throw new Error("Could not parse JSON from Claude response");
+}
+
 async function runContentDNA(allPosts, mind, onProgress) {
-  // Multi-pass deep analysis across entire post corpus
-  // Pass 1: Theme & topic mapping (early posts sample)
+  const clean = posts => posts.map(p=>({date:p.date, content:sanitiseForPrompt(p.content)}));
+
+  // Pass 1: Theme & topic mapping
   onProgress("Pass 1/4 — mapping themes across your history...", 10);
   const early = allPosts.slice(Math.max(0,allPosts.length-200), allPosts.length);
   const recent = allPosts.slice(0, Math.min(200, allPosts.length));
-  const earlyStep = Math.max(1, Math.floor(early.length/20));
-  const recentStep = Math.max(1, Math.floor(recent.length/20));
-  const earlySample = early.filter((_,i)=>i%earlyStep===0).slice(0,20);
-  const recentSample = recent.filter((_,i)=>i%recentStep===0).slice(0,20);
+  const earlySample = early.filter((_,i)=>i%Math.max(1,Math.floor(early.length/20))===0).slice(0,20);
+  const recentSample = recent.filter((_,i)=>i%Math.max(1,Math.floor(recent.length/20))===0).slice(0,20);
 
   const pass1 = await callClaude(
-    `You are the BGB Content Intelligence agent doing a deep Content DNA analysis for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"themes":[{"name":"...","frequency":"high|medium|low","evolutionNote":"how this theme changed over time"}],"topicClusters":["..."],"audienceAngle":"who Stephen writes to and how"}`,
-    `EARLY posts (${earlySample.length} sampled):\n${JSON.stringify(earlySample.map(p=>({date:p.date,content:p.content?.slice(0,300)})))}\n\nRECENT posts (${recentSample.length} sampled):\n${JSON.stringify(recentSample.map(p=>({date:p.date,content:p.content?.slice(0,300)})))}`,
+    `You are the BGB Content Intelligence agent doing a deep Content DNA analysis for Stephen at BGB Consulting. He helps $1M-$5M business owners install a GM and escape the founder trap.\nReturn ONLY valid JSON with no line breaks inside string values: {"themes":[{"name":"...","frequency":"high|medium|low","evolutionNote":"..."}],"topicClusters":["..."],"audienceAngle":"..."}`,
+    `EARLY posts (${earlySample.length}):\n${JSON.stringify(clean(earlySample))}\n\nRECENT posts (${recentSample.length}):\n${JSON.stringify(clean(recentSample))}`,
     4000
   );
-  const themes = JSON.parse(pass1);
+  const themes = parseJSON(pass1);
   onProgress("Pass 2/4 — extracting hook formulas and opening lines...", 35);
 
   // Pass 2: Hook & opening line analysis
-  const hookSample = allPosts.slice(0, Math.min(allPosts.length, 150));
-  const hookStep = Math.max(1, Math.floor(hookSample.length/40));
-  const hooks = hookSample.filter((_,i)=>i%hookStep===0).slice(0,40).map(p=>p.content?.split('\n')[0]?.slice(0,120)||"").filter(Boolean);
+  const hookStep = Math.max(1, Math.floor(allPosts.length/40));
+  const hooks = allPosts.filter((_,i)=>i%hookStep===0).slice(0,40)
+    .map(p=>sanitiseForPrompt(p.content?.split('\n')[0]||"", 120)).filter(h=>h.length>10);
   const pass2 = await callClaude(
-    `You are the BGB Content Intelligence agent analysing opening lines and hook formulas for Stephen at BGB Consulting.\nReturn ONLY valid JSON: {"hookFormulas":[{"pattern":"...","example":"...","strength":"strong|medium|weak","frequency":0}],"openingWordPatterns":["..."],"avoidPatterns":["opening lines that appear flat or generic"]}`,
+    `You are the BGB Content Intelligence agent analysing opening lines and hook formulas for Stephen at BGB Consulting.\nReturn ONLY valid JSON with no line breaks inside string values: {"hookFormulas":[{"pattern":"...","example":"...","strength":"strong|medium|weak"}],"openingWordPatterns":["..."],"avoidPatterns":["..."]}`,
     `Opening lines from ${hooks.length} posts:\n${JSON.stringify(hooks)}`,
     4000
   );
-  const hookData = JSON.parse(pass2);
+  const hookData = parseJSON(pass2);
   onProgress("Pass 3/4 — analysing voice, style and language DNA...", 60);
 
   // Pass 3: Voice & style deep analysis
-  const styleSample = allPosts.filter((_,i)=>i%Math.max(1,Math.floor(allPosts.length/30))===0).slice(0,30);
+  const styleStep = Math.max(1, Math.floor(allPosts.length/30));
+  const styleSample = allPosts.filter((_,i)=>i%styleStep===0).slice(0,30);
   const pass3 = await callClaude(
-    `You are the BGB Content Intelligence agent doing a deep voice and style analysis for Stephen.\nReturn ONLY valid JSON: {"voiceSignatures":["specific phrases, rhythms, or structural patterns that are distinctly Stephen's"],"sentencePatterns":["..."],"vocabularyDNA":["words and phrases Stephen uses that nobody else does"],"toneMarkers":["..."],"structuralPatterns":["how Stephen typically structures a post — beginning, middle, end"],"thingsToAvoid":["patterns that appear weak or inconsistent with his best work"]}`,
-    `Posts for voice analysis:\n${JSON.stringify(styleSample.map(p=>({date:p.date,content:p.content?.slice(0,400)})))}`,
+    `You are the BGB Content Intelligence agent doing a deep voice and style analysis for Stephen.\nReturn ONLY valid JSON with no line breaks inside string values: {"voiceSignatures":["..."],"vocabularyDNA":["..."],"structuralPatterns":["..."],"thingsToAvoid":["..."]}`,
+    `Posts for voice analysis:\n${JSON.stringify(clean(styleSample))}`,
     4000
   );
-  const voiceData = JSON.parse(pass3);
-  onProgress("Pass 4/4 — identifying gaps and generating content DNA report...", 80);
+  const voiceData = parseJSON(pass3);
+  onProgress("Pass 4/4 — synthesising Content DNA report...", 80);
 
-  // Pass 4: Synthesis — gaps, opportunities, Mind Bank recommendations
+  // Pass 4: Synthesis
   const pass4 = await callClaude(
-    `You are the BGB Content Intelligence agent. Synthesise a Content DNA report for Stephen.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"contentDNASummary":"2-3 sentence summary of Stephen's content identity","topPerformingAngles":["..."],"underusedAngles":["angles rarely used but with high potential"],"mindBankRecommendations":[{"title":"...","body":"...","category":"frameworks|clientStories|contrarian|language","tags":["..."],"why":"one sentence on why this belongs in the mind bank"}],"whatWorksRecommendations":[{"formatName":"...","description":"...","why":"..."}],"weeklyContentPlan":["7 specific post ideas based on what works"]}`,
-    `Theme analysis: ${JSON.stringify(themes)}\nHook analysis: ${JSON.stringify(hookData)}\nVoice analysis: ${JSON.stringify(voiceData)}\nTotal posts analysed: ${allPosts.length}`,
+    `You are the BGB Content Intelligence agent. Synthesise a Content DNA report for Stephen.\nReturn ONLY valid JSON with no line breaks inside string values: {"contentDNASummary":"...","topPerformingAngles":["..."],"underusedAngles":["..."],"mindBankRecommendations":[{"title":"...","body":"...","category":"frameworks|clientStories|contrarian|language","tags":["..."],"why":"..."}],"whatWorksRecommendations":[{"formatName":"...","description":"...","why":"..."}],"weeklyContentPlan":["..."]}`,
+    `Themes: ${JSON.stringify(themes)}\nHooks: ${JSON.stringify(hookData)}\nVoice: ${JSON.stringify(voiceData)}\nTotal posts: ${allPosts.length}`,
     5000
   );
-  const synthesis = JSON.parse(pass4);
+  const synthesis = parseJSON(pass4);
   onProgress("Complete.", 100);
 
   return { themes, hookData, voiceData, synthesis, totalPosts: allPosts.length };
