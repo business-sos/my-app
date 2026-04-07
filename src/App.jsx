@@ -1079,10 +1079,36 @@ async function analyzeAnalytics(data, mind, formats) {
   return JSON.parse(raw);
 }
 
+function parseFacebookExport(jsonText) {
+  const data = JSON.parse(jsonText);
+  const raw = Array.isArray(data) ? data : (data.posts || []);
+  return raw
+    .map(p => ({
+      id: String(p.timestamp),
+      date: new Date(p.timestamp * 1000).toISOString().slice(0,10),
+      content: p.data?.[0]?.post || "",
+      title: p.title || "",
+    }))
+    .filter(p => p.content.trim().length > 20)
+    .sort((a,b) => b.date.localeCompare(a.date));
+}
+
+async function analyzeFacebookHistory(posts, mind) {
+  const step = Math.max(1, Math.floor(posts.length / 40));
+  const sampled = posts.filter((_,i) => i < 20 || i % step === 0).slice(0,60);
+  const raw = await callClaude(
+    `You are the BGB Content Intelligence agent. Analyse Facebook post history for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"topThemes":["..."],"hookPatterns":["..."],"styleInsights":["..."],"underusedAngles":["..."],"recommendations":[{"text":"...","category":"framework|contrarian|language"}]}`,
+    `Facebook posts (sample of ${sampled.length} from ${posts.length} total):\n${JSON.stringify(sampled.map(p=>({date:p.date,content:p.content})))}`,
+    4000
+  );
+  return JSON.parse(raw);
+}
+
 // ─── ANALYTICS PAGE ──────────────────────────────────────────────────────────
 function AnalyticsPage({ mind, setMind, formats }) {
   const [igToken,setIgToken] = useState(()=>localStorage.getItem("bgb_ig_token")||"");
   const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false);
+  const [fbPosts,setFbPosts] = useState([]); const [fbErr,setFbErr] = useState(""); const [fbAnalysis,setFbAnalysis] = useState(null); const [fbALoading,setFbALoading] = useState(false);
   const [ytKey,setYtKey] = useState(()=>localStorage.getItem("bgb_yt_key")||"");
   const [ytChannelId,setYtChannelId] = useState(()=>localStorage.getItem("bgb_yt_channel_id")||"");
   const [ytData,setYtData] = useState(null); const [ytLoading,setYtLoading] = useState(false); const [ytErr,setYtErr] = useState(""); const [ytAnalysis,setYtAnalysis] = useState(null); const [ytALoading,setYtALoading] = useState(false);
@@ -1179,6 +1205,61 @@ function AnalyticsPage({ mind, setMind, formats }) {
             <button className="btn bp" onClick={()=>runAnalysis(igData,setIgAnalysis,setIgALoading)} disabled={igALoading}>{igALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
           </div>
           <AnalysisPanel analysis={igAnalysis} onAddToMind={addToMind}/>
+        </>}
+      </div>
+
+      {/* ── FACEBOOK HISTORY ── */}
+      <div className="card mb16">
+        <div className="ct">📘 Facebook Post History <span className="xs muted" style={{fontWeight:400}}>Data Export</span>
+          {fbPosts.length>0&&<span className="tag tb mla">{fbPosts.length} posts imported</span>}
+        </div>
+        <div className="alert ag mb12" style={{fontSize:12}}>
+          <strong>How to export:</strong> Facebook → Settings → Your Facebook Information → Download Your Information → tick <strong>Posts only</strong> → Format: <strong>JSON</strong> → Request Download. Extract the zip and upload <code>posts/your_posts_1.json</code> below.
+        </div>
+        {fbErr&&<div className="alert ar mb12">{fbErr}</div>}
+        <div className="fg">
+          <label className="lbl">Upload your_posts_1.json</label>
+          <input type="file" accept=".json" style={{padding:"8px 0",fontSize:13,color:"var(--ink)"}} onChange={e=>{
+            const file=e.target.files[0]; if(!file) return;
+            setFbErr(""); setFbPosts([]); setFbAnalysis(null);
+            const reader=new FileReader();
+            reader.onload=ev=>{
+              try { const posts=parseFacebookExport(ev.target.result); if(!posts.length) throw new Error("No text posts found — make sure you selected JSON format."); setFbPosts(posts); }
+              catch(err){ setFbErr("Parse failed: "+err.message); }
+            };
+            reader.readAsText(file);
+          }}/>
+        </div>
+        {fbPosts.length>0&&<>
+          <div className="g3 mb16">
+            <div className="sc gold"><div className="sl">Posts</div><div className="sv">{fbPosts.length}</div></div>
+            <div className="sc sage"><div className="sl">Oldest</div><div className="sv" style={{fontSize:16}}>{fbPosts[fbPosts.length-1]?.date}</div></div>
+            <div className="sc rust"><div className="sl">Most Recent</div><div className="sv" style={{fontSize:16}}>{fbPosts[0]?.date}</div></div>
+          </div>
+          <div className="ct" style={{fontSize:13}}>Recent posts</div>
+          {fbPosts.slice(0,5).map((p,i)=>(
+            <div key={p.id} className="li">
+              <div className="lidate xs muted">{p.date.slice(5)}</div>
+              <div className="libody"><div className="liprev">{p.content.slice(0,120)}</div></div>
+            </div>
+          ))}
+          <div className="mt12">
+            <button className="btn bp" onClick={async()=>{setFbALoading(true);try{setFbAnalysis(await analyzeFacebookHistory(fbPosts,mind));}catch(e){setFbErr("Analysis failed: "+e.message);}finally{setFbALoading(false);}}} disabled={fbALoading}>{fbALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
+          </div>
+          {fbAnalysis&&<div className="rp mt16">
+            <div className="ct" style={{fontSize:13}}>🤖 Facebook History Analysis</div>
+            {fbAnalysis.topThemes?.length>0&&<div className="mb12"><div className="xs muted mb6">Top themes</div><div className="f g4x fw">{fbAnalysis.topThemes.map(t=><span key={t} className="tag tg">{t}</span>)}</div></div>}
+            {fbAnalysis.hookPatterns?.length>0&&<div className="mb12"><div className="xs muted mb6">Hook patterns that worked</div>{fbAnalysis.hookPatterns.map((h,i)=><div key={i} className="sm mb4">· {h}</div>)}</div>}
+            {fbAnalysis.styleInsights?.length>0&&<div className="mb12"><div className="xs muted mb6">Style insights</div>{fbAnalysis.styleInsights.map((s,i)=><div key={i} className="sm mb4">· {s}</div>)}</div>}
+            {fbAnalysis.underusedAngles?.length>0&&<div className="mb12"><div className="xs muted mb6">Underused angles</div>{fbAnalysis.underusedAngles.map((u,i)=><div key={i} className="sm mb4">· {u}</div>)}</div>}
+            {fbAnalysis.recommendations?.length>0&&<div><div className="xs muted mb8">Recommendations — add to Mind Bank</div>{fbAnalysis.recommendations.map((r,i)=>(
+              <div key={i} className="f fac g8 mb8">
+                <div className="sm" style={{flex:1}}>{r.text}</div>
+                <span className="tag ti">{r.category}</span>
+                <button className="btn bsa bsm" onClick={()=>addToMind(r)}>+ Mind</button>
+              </div>
+            ))}</div>}
+          </div>}
         </>}
       </div>
 
