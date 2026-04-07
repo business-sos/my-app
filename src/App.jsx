@@ -1134,10 +1134,14 @@ function AnalyticsPage({ mind, setMind, formats }) {
     catch(e){ alert("Analysis failed: "+e.message); } finally { setALoading(false); }
   };
 
-  const addToMind = (rec) => {
-    const entry = { id:Date.now(), title:"From "+rec.category+" analysis", body:rec.text, tags:["analytics","auto"] };
-    const key = rec.category==="contrarian"?"contrarian":"frameworks";
+  const [mindAdded, setMindAdded] = useState({});
+  const addToMind = (rec, recId) => {
+    const body = rec.text || rec.body || rec.insight || rec.recommendation || JSON.stringify(rec);
+    const category = rec.category || "frameworks";
+    const entry = { id:Date.now(), title:"From "+category+" analysis", body, tags:["analytics","auto"] };
+    const key = category==="contrarian"?"contrarian":category==="language"?"language":"frameworks";
     setMind(m=>({...m,[key]:[...m[key],entry]}));
+    setMindAdded(a=>({...a,[recId||body]:true}));
   };
 
   const sigCol = {high:"ts",medium:"tg",low:"tr"};
@@ -1149,13 +1153,16 @@ function AnalyticsPage({ mind, setMind, formats }) {
       {analysis.themes?.length>0&&<div className="mb12"><div className="xs muted mb6">Top themes</div><div className="f g4x fw">{analysis.themes.map(t=><span key={t} className="tag tg">{t}</span>)}</div></div>}
       {analysis.hookPatterns?.length>0&&<div className="mb12"><div className="xs muted mb6">Hook patterns that worked</div>{analysis.hookPatterns.map((h,i)=><div key={i} className="sm mb4">· {h}</div>)}</div>}
       {analysis.bestPostingTime&&<div className="mb12"><div className="xs muted mb4">Best posting time</div><span className="tag tb">{analysis.bestPostingTime}</span></div>}
-      {analysis.recommendations?.length>0&&<div><div className="xs muted mb8">Recommendations — add to Mind Bank</div>{analysis.recommendations.map((r,i)=>(
-        <div key={i} className="f fac g8 mb8">
-          <div className="sm" style={{flex:1}}>{r.text}</div>
-          <span className="tag ti">{r.category}</span>
-          <button className="btn bsa bsm" onClick={()=>onAddToMind(r)}>+ Mind</button>
-        </div>
-      ))}</div>}
+      {analysis.recommendations?.length>0&&<div><div className="xs muted mb8">Recommendations — add to Mind Bank</div>{analysis.recommendations.map((r,i)=>{
+        const rid=analysis.platform+"-"+i; const done=mindAdded[rid||r.text];
+        return (
+          <div key={i} className="f fac g8 mb8">
+            <div className="sm" style={{flex:1}}>{r.text||r.body||r.insight}</div>
+            <span className="tag ti">{r.category||"framework"}</span>
+            <button className={`btn bsm ${done?"bsa":"bp"}`} onClick={()=>{onAddToMind(r,rid);}}>{done?"✓ Added":"+ Mind"}</button>
+          </div>
+        );
+      })}</div>}
     </div>
   );
 
@@ -1252,13 +1259,16 @@ function AnalyticsPage({ mind, setMind, formats }) {
             {fbAnalysis.hookPatterns?.length>0&&<div className="mb12"><div className="xs muted mb6">Hook patterns that worked</div>{fbAnalysis.hookPatterns.map((h,i)=><div key={i} className="sm mb4">· {h}</div>)}</div>}
             {fbAnalysis.styleInsights?.length>0&&<div className="mb12"><div className="xs muted mb6">Style insights</div>{fbAnalysis.styleInsights.map((s,i)=><div key={i} className="sm mb4">· {s}</div>)}</div>}
             {fbAnalysis.underusedAngles?.length>0&&<div className="mb12"><div className="xs muted mb6">Underused angles</div>{fbAnalysis.underusedAngles.map((u,i)=><div key={i} className="sm mb4">· {u}</div>)}</div>}
-            {fbAnalysis.recommendations?.length>0&&<div><div className="xs muted mb8">Recommendations — add to Mind Bank</div>{fbAnalysis.recommendations.map((r,i)=>(
-              <div key={i} className="f fac g8 mb8">
-                <div className="sm" style={{flex:1}}>{r.text}</div>
-                <span className="tag ti">{r.category}</span>
-                <button className="btn bsa bsm" onClick={()=>addToMind(r)}>+ Mind</button>
-              </div>
-            ))}</div>}
+            {fbAnalysis.recommendations?.length>0&&<div><div className="xs muted mb8">Recommendations — add to Mind Bank</div>{fbAnalysis.recommendations.map((r,i)=>{
+              const rid="fb-"+i; const done=mindAdded[rid||r.text];
+              return (
+                <div key={i} className="f fac g8 mb8">
+                  <div className="sm" style={{flex:1}}>{r.text||r.body||r.insight||r.recommendation}</div>
+                  <span className="tag ti">{r.category||"framework"}</span>
+                  <button className={`btn bsm ${done?"bsa":"bp"}`} onClick={()=>addToMind(r,rid)}>{done?"✓ Added":"+ Mind"}</button>
+                </div>
+              );
+            })}</div>}
           </div>}
         </>}
       </div>
