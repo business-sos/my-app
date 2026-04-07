@@ -1079,6 +1079,285 @@ async function analyzeAnalytics(data, mind, formats) {
   return JSON.parse(raw);
 }
 
+function parseLinkedInCSV(text) {
+  const MONTHS = {January:'01',February:'02',March:'03',April:'04',May:'05',June:'06',July:'07',August:'08',September:'09',October:'10',November:'11',December:'12'};
+  const parseDate = str => { const m=str.match(/([A-Z][a-z]+)\s+(\d+),\s+(\d{4})/); return m?`${m[3]}-${MONTHS[m[1]]||'00'}-${m[2].padStart(2,'0')}`:str.slice(0,10); };
+  const lines = text.split('\n'); const header = lines[0].toLowerCase();
+  const isRichMedia = header.includes('media description');
+  const rows = []; let cur = '', inQ = false;
+  for (let i=1;i<lines.length;i++) { for (const ch of lines[i]) { if(ch==='"') inQ=!inQ; cur+=ch; } if(!inQ){rows.push(cur);cur='';} else cur+='\n'; }
+  const parseRow = row => { const cols=[]; let f='',q=false; for(const ch of row){if(ch==='"'){q=!q;}else if(ch===','&&!q){cols.push(f.trim().replace(/^"|"$/g,''));f='';}else f+=ch;} cols.push(f.trim().replace(/^"|"$/g,'')); return cols; };
+  return rows.filter(r=>r.trim()).map(r=>{ const cols=parseRow(r);
+    if(isRichMedia){ const [dateRaw,,desc,,link]=cols; if(!desc||desc==='-') return null; return {id:link||dateRaw, date:parseDate(dateRaw), content:desc, platform:'LinkedIn'}; }
+    else { const [dateRaw,,,,commentary]=cols; if(!commentary?.trim()) return null; return {id:dateRaw+commentary.slice(0,20), date:parseDate(dateRaw), content:commentary, platform:'LinkedIn'}; }
+  }).filter(Boolean).sort((a,b)=>b.date.localeCompare(a.date));
+}
+
+// ─── CONTENT DNA ─────────────────────────────────────────────────────────────
+async function runContentDNA(allPosts, mind, onProgress) {
+  // Multi-pass deep analysis across entire post corpus
+  // Pass 1: Theme & topic mapping (early posts sample)
+  onProgress("Pass 1/4 — mapping themes across your history...", 10);
+  const early = allPosts.slice(Math.max(0,allPosts.length-200), allPosts.length);
+  const recent = allPosts.slice(0, Math.min(200, allPosts.length));
+  const earlyStep = Math.max(1, Math.floor(early.length/20));
+  const recentStep = Math.max(1, Math.floor(recent.length/20));
+  const earlySample = early.filter((_,i)=>i%earlyStep===0).slice(0,20);
+  const recentSample = recent.filter((_,i)=>i%recentStep===0).slice(0,20);
+
+  const pass1 = await callClaude(
+    `You are the BGB Content Intelligence agent doing a deep Content DNA analysis for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"themes":[{"name":"...","frequency":"high|medium|low","evolutionNote":"how this theme changed over time"}],"topicClusters":["..."],"audienceAngle":"who Stephen writes to and how"}`,
+    `EARLY posts (${earlySample.length} sampled):\n${JSON.stringify(earlySample.map(p=>({date:p.date,content:p.content?.slice(0,300)})))}\n\nRECENT posts (${recentSample.length} sampled):\n${JSON.stringify(recentSample.map(p=>({date:p.date,content:p.content?.slice(0,300)})))}`,
+    4000
+  );
+  const themes = JSON.parse(pass1);
+  onProgress("Pass 2/4 — extracting hook formulas and opening lines...", 35);
+
+  // Pass 2: Hook & opening line analysis
+  const hookSample = allPosts.slice(0, Math.min(allPosts.length, 150));
+  const hookStep = Math.max(1, Math.floor(hookSample.length/40));
+  const hooks = hookSample.filter((_,i)=>i%hookStep===0).slice(0,40).map(p=>p.content?.split('\n')[0]?.slice(0,120)||"").filter(Boolean);
+  const pass2 = await callClaude(
+    `You are the BGB Content Intelligence agent analysing opening lines and hook formulas for Stephen at BGB Consulting.\nReturn ONLY valid JSON: {"hookFormulas":[{"pattern":"...","example":"...","strength":"strong|medium|weak","frequency":0}],"openingWordPatterns":["..."],"avoidPatterns":["opening lines that appear flat or generic"]}`,
+    `Opening lines from ${hooks.length} posts:\n${JSON.stringify(hooks)}`,
+    4000
+  );
+  const hookData = JSON.parse(pass2);
+  onProgress("Pass 3/4 — analysing voice, style and language DNA...", 60);
+
+  // Pass 3: Voice & style deep analysis
+  const styleSample = allPosts.filter((_,i)=>i%Math.max(1,Math.floor(allPosts.length/30))===0).slice(0,30);
+  const pass3 = await callClaude(
+    `You are the BGB Content Intelligence agent doing a deep voice and style analysis for Stephen.\nReturn ONLY valid JSON: {"voiceSignatures":["specific phrases, rhythms, or structural patterns that are distinctly Stephen's"],"sentencePatterns":["..."],"vocabularyDNA":["words and phrases Stephen uses that nobody else does"],"toneMarkers":["..."],"structuralPatterns":["how Stephen typically structures a post — beginning, middle, end"],"thingsToAvoid":["patterns that appear weak or inconsistent with his best work"]}`,
+    `Posts for voice analysis:\n${JSON.stringify(styleSample.map(p=>({date:p.date,content:p.content?.slice(0,400)})))}`,
+    4000
+  );
+  const voiceData = JSON.parse(pass3);
+  onProgress("Pass 4/4 — identifying gaps and generating content DNA report...", 80);
+
+  // Pass 4: Synthesis — gaps, opportunities, Mind Bank recommendations
+  const pass4 = await callClaude(
+    `You are the BGB Content Intelligence agent. Synthesise a Content DNA report for Stephen.\n${voiceCtx(mind)}\nReturn ONLY valid JSON: {"contentDNASummary":"2-3 sentence summary of Stephen's content identity","topPerformingAngles":["..."],"underusedAngles":["angles rarely used but with high potential"],"mindBankRecommendations":[{"title":"...","body":"...","category":"frameworks|clientStories|contrarian|language","tags":["..."],"why":"one sentence on why this belongs in the mind bank"}],"whatWorksRecommendations":[{"formatName":"...","description":"...","why":"..."}],"weeklyContentPlan":["7 specific post ideas based on what works"]}`,
+    `Theme analysis: ${JSON.stringify(themes)}\nHook analysis: ${JSON.stringify(hookData)}\nVoice analysis: ${JSON.stringify(voiceData)}\nTotal posts analysed: ${allPosts.length}`,
+    5000
+  );
+  const synthesis = JSON.parse(pass4);
+  onProgress("Complete.", 100);
+
+  return { themes, hookData, voiceData, synthesis, totalPosts: allPosts.length };
+}
+
+function ContentDNAPage({ mind, setMind, formats, setFormats }) {
+  const [posts, setPosts] = useState([]);
+  const [sources, setSources] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [progressPct, setProgressPct] = useState(0);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+  const [added, setAdded] = useState({});
+
+  const onProgress = (msg, pct) => { setProgress(msg); setProgressPct(pct); };
+
+  const loadFile = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsText(file);
+  });
+
+  const handleFiles = async (files) => {
+    setErr(""); const newPosts = [...posts]; const newSources = [...sources];
+    for (const file of Array.from(files)) {
+      try {
+        const text = await loadFile(file);
+        let parsed = [];
+        if (file.name.endsWith(".json")) {
+          parsed = parseFacebookExport(text);
+        } else if (file.name.endsWith(".csv")) {
+          // reuse LinkedIn CSV logic inline
+          const lines = text.split('\n'); const header = lines[0].toLowerCase();
+          if (header.includes('sharecommentary') || header.includes('media description')) {
+            parsed = parseLinkedInCSV(text);
+          } else {
+            setErr(`Unrecognised CSV format in ${file.name}`); continue;
+          }
+        }
+        if (parsed.length) {
+          newPosts.push(...parsed);
+          newSources.push(`${file.name} (${parsed.length} posts)`);
+        }
+      } catch(e) { setErr(`Error reading ${file.name}: ${e.message}`); }
+    }
+    // deduplicate by id
+    const seen = new Set(); const deduped = newPosts.filter(p=>{ if(seen.has(p.id)) return false; seen.add(p.id); return true; });
+    setPosts(deduped); setSources(newSources);
+  };
+
+  const run = async () => {
+    if (!posts.length) return;
+    setLoading(true); setErr(""); setResult(null); setProgress(""); setProgressPct(0);
+    try { setResult(await runContentDNA(posts, mind, onProgress)); }
+    catch(e) { setErr("Analysis failed: " + e.message); }
+    finally { setLoading(false); }
+  };
+
+  const addEntryToMind = (rec, key) => {
+    const id = key||rec.title;
+    setMind(m=>({...m,[rec.category||"frameworks"]:[...m[rec.category||"frameworks"],{id:Date.now(),title:rec.title,body:rec.body,tags:rec.tags||["content-dna"]}]}));
+    setAdded(a=>({...a,[id]:true}));
+  };
+
+  const addFormatToWhatWorks = (f, key) => {
+    setFormats(prev=>[...prev,{id:Date.now(),name:f.formatName,description:f.description,status:"testing",avgDocViews:0,avgCalls:0,postsUsed:0,notes:f.why||""}]);
+    setAdded(a=>({...a,[key]:true}));
+  };
+
+  return (
+    <div>
+      <div className="alert av mb20">
+        <strong>Content DNA</strong> — deep 4-pass analysis of your entire post history. Upload your LinkedIn CSV and/or Facebook JSON export. Claude analyses themes, hook formulas, voice patterns, and gaps — then generates a Content DNA report with Mind Bank and What Works recommendations.
+      </div>
+
+      {/* File upload */}
+      <div className="card mb16">
+        <div className="ct">📂 Upload Post History</div>
+        <div style={{border:"2px dashed var(--border)",borderRadius:2,padding:"28px 20px",textAlign:"center",background:"var(--paper)",marginBottom:12}}
+          onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="var(--gold)"}}
+          onDragLeave={e=>{e.currentTarget.style.borderColor="var(--border)"}}
+          onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="var(--border)";handleFiles(e.dataTransfer.files);}}>
+          <div style={{fontSize:28,marginBottom:8}}>📄</div>
+          <div className="sm mb8">Drag files here or click to browse</div>
+          <div className="xs muted mb12">LinkedIn: <strong>Shares.csv</strong> or <strong>Rich_Media.csv</strong> · Facebook: <strong>your_posts_1.json</strong></div>
+          <input type="file" accept=".json,.csv" multiple style={{display:"none"}} id="dna-upload" onChange={e=>handleFiles(e.target.files)}/>
+          <label htmlFor="dna-upload" className="btn bo" style={{cursor:"pointer"}}>Browse files</label>
+        </div>
+        {err&&<div className="alert ar mb12">{err}</div>}
+        {sources.length>0&&<>
+          <div className="xs muted mb8">Loaded sources:</div>
+          {sources.map((s,i)=><div key={i} className="f fac g8 mb4"><span className="tag ts">✓</span><span className="sm">{s}</span></div>)}
+          <div className="div"/>
+          <div className="f fac g8">
+            <div className="sc gold" style={{flex:1,padding:"12px 16px"}}><div className="sl">Total Posts</div><div className="sv">{posts.length}</div></div>
+            <div className="sc sage" style={{flex:1,padding:"12px 16px"}}><div className="sl">Oldest</div><div className="sv" style={{fontSize:15}}>{posts.length?posts[posts.length-1]?.date:"—"}</div></div>
+            <div className="sc rust" style={{flex:1,padding:"12px 16px"}}><div className="sl">Most Recent</div><div className="sv" style={{fontSize:15}}>{posts.length?posts[0]?.date:"—"}</div></div>
+          </div>
+          <div className="mt16">
+            <button className="btn bp w100" style={{padding:"13px 16px",fontSize:14}} onClick={run} disabled={loading||!posts.length}>
+              {loading?<><span className="spin-d spin"/> {progress}</>:"Run Content DNA Analysis →"}
+            </button>
+            {loading&&<div className="pb mt8"><div className="pf" style={{width:`${progressPct}%`,background:"var(--violet)"}}/></div>}
+          </div>
+        </>}
+      </div>
+
+      {result&&<>
+        {/* DNA Summary */}
+        <div className="card mb16" style={{borderColor:"rgba(92,75,138,0.4)"}}>
+          <div className="ct">🧬 Your Content DNA</div>
+          <div style={{fontSize:14,lineHeight:1.7,color:"var(--ink)",marginBottom:16}}>{result.synthesis.contentDNASummary}</div>
+          <div className="g2">
+            <div><div className="xs muted mb8">Top performing angles</div>{result.synthesis.topPerformingAngles?.map((a,i)=><div key={i} className="sm mb6">→ {a}</div>)}</div>
+            <div><div className="xs muted mb8">Underused angles (opportunity)</div>{result.synthesis.underusedAngles?.map((a,i)=><div key={i} className="sm mb6 muted">· {a}</div>)}</div>
+          </div>
+        </div>
+
+        {/* Themes */}
+        <div className="card mb16">
+          <div className="ct">🎯 Theme Map</div>
+          <div className="g3">
+            {result.themes.themes?.map((t,i)=>(
+              <div key={i} className="kbi">
+                <div className="kbih"><div className="kbit">{t.name}</div><span className={`tag ${t.frequency==="high"?"ts":t.frequency==="medium"?"tg":"tr"}`}>{t.frequency}</span></div>
+                {t.evolutionNote&&<div className="kbib xs muted">{t.evolutionNote}</div>}
+              </div>
+            ))}
+          </div>
+          {result.themes.audienceAngle&&<div className="alert ag mt12"><strong>Audience angle:</strong> {result.themes.audienceAngle}</div>}
+        </div>
+
+        {/* Hook Formulas */}
+        <div className="card mb16">
+          <div className="ct">🎣 Hook Formulas</div>
+          {result.hookData.hookFormulas?.map((h,i)=>(
+            <div key={i} className="kbi">
+              <div className="kbih">
+                <div className="kbit">{h.pattern}</div>
+                <span className={`tag ${h.strength==="strong"?"ts":h.strength==="medium"?"tg":"tr"}`}>{h.strength}</span>
+              </div>
+              {h.example&&<div className="kbib" style={{fontStyle:"italic"}}>"{h.example}"</div>}
+            </div>
+          ))}
+          {result.hookData.avoidPatterns?.length>0&&<div className="mt12"><div className="xs muted mb6">Avoid these openings</div>{result.hookData.avoidPatterns.map((p,i)=><div key={i} className="sm mb4" style={{color:"var(--rust)"}}>✗ {p}</div>)}</div>}
+        </div>
+
+        {/* Voice DNA */}
+        <div className="card mb16">
+          <div className="ct">✍️ Voice DNA</div>
+          <div className="g2">
+            <div>
+              {result.voiceData.voiceSignatures?.length>0&&<div className="mb12"><div className="xs muted mb6">Voice signatures</div>{result.voiceData.voiceSignatures.map((v,i)=><div key={i} className="sm mb4">· {v}</div>)}</div>}
+              {result.voiceData.vocabularyDNA?.length>0&&<div className="mb12"><div className="xs muted mb6">Vocabulary DNA</div><div className="f g4x fw">{result.voiceData.vocabularyDNA.map(w=><span key={w} className="tag tg">{w}</span>)}</div></div>}
+            </div>
+            <div>
+              {result.voiceData.structuralPatterns?.length>0&&<div className="mb12"><div className="xs muted mb6">Structural patterns</div>{result.voiceData.structuralPatterns.map((s,i)=><div key={i} className="sm mb4">· {s}</div>)}</div>}
+              {result.voiceData.thingsToAvoid?.length>0&&<div><div className="xs muted mb6">Things to avoid</div>{result.voiceData.thingsToAvoid.map((t,i)=><div key={i} className="sm mb4" style={{color:"var(--rust)"}}>✗ {t}</div>)}</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* This Week */}
+        {result.synthesis.weeklyContentPlan?.length>0&&<div className="card mb16">
+          <div className="ct">📅 7 Post Ideas — Based on Your DNA</div>
+          {result.synthesis.weeklyContentPlan.map((idea,i)=>(
+            <div key={i} className="li" style={{padding:"9px 0"}}>
+              <div style={{width:24,flexShrink:0,fontFamily:"Playfair Display,serif",color:"var(--gold)",fontWeight:700}}>{i+1}</div>
+              <div className="sm">{idea}</div>
+            </div>
+          ))}
+        </div>}
+
+        {/* Mind Bank Recommendations */}
+        <div className="card mb16">
+          <div className="ct">🧠 Mind Bank Recommendations <span className="xs muted" style={{fontWeight:400}}>— curated from {result.totalPosts} posts</span></div>
+          <div className="alert ag mb16">These are the highest-signal entries worth adding. Pick the ones that feel true — don't add all of them.</div>
+          {result.synthesis.mindBankRecommendations?.map((rec,i)=>{
+            const key="dna-mind-"+i; const done=added[key];
+            return (
+              <div key={i} className="kbi" style={done?{opacity:0.5}:{}}>
+                <div className="kbih">
+                  <div className="kbit">{rec.title}</div>
+                  <span className={`tag ${rec.category==="contrarian"?"tr":rec.category==="language"?"tv":"tg"}`}>{rec.category}</span>
+                  <button className={`btn bsm mla ${done?"bsa":"bp"}`} onClick={()=>addEntryToMind(rec,key)} disabled={done}>{done?"✓ Added":"+ Add to Mind"}</button>
+                </div>
+                <div className="kbib">{rec.body}</div>
+                {rec.why&&<div className="xs muted mt8" style={{fontStyle:"italic"}}>Why: {rec.why}</div>}
+                {rec.tags?.length>0&&<div className="f g4x fw mt8">{rec.tags.map(t=><span key={t} className="tag ti">{t}</span>)}</div>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* What Works Recommendations */}
+        {result.synthesis.whatWorksRecommendations?.length>0&&<div className="card mb16">
+          <div className="ct">✦ What Works Recommendations</div>
+          {result.synthesis.whatWorksRecommendations.map((f,i)=>{
+            const key="dna-fmt-"+i; const done=added[key];
+            return (
+              <div key={i} className="fc" style={done?{opacity:0.5}:{}}>
+                <div className="fcname">{f.formatName}</div>
+                <div className="fcdesc">{f.description}</div>
+                {f.why&&<div className="xs muted mb10">{f.why}</div>}
+                <button className={`btn bsm ${done?"bsa":"bv"}`} onClick={()=>addFormatToWhatWorks(f,key)} disabled={done}>{done?"✓ Added to Testing":"+ Add to What Works"}</button>
+              </div>
+            );
+          })}
+        </div>}
+      </>}
+    </div>
+  );
+}
+
 function parseFacebookExport(jsonText) {
   const data = JSON.parse(jsonText);
   const raw = Array.isArray(data) ? data : (data.posts || []);
@@ -1444,6 +1723,7 @@ const NAV = [
   {id:"review",label:"Review Queue",icon:"◐",badge:"review"},
   {id:"report",label:"Weekly Report",icon:"📊"},
   {id:"analytics",label:"Analytics",icon:"📈"},
+  {id:"dna",label:"Content DNA",icon:"🧬"},
   {sec:"Knowledge Banks"},
   {id:"mind",label:"Your Mind",icon:"🧠"},
   {id:"whatworks",label:"What Works",icon:"✦"},
@@ -1452,7 +1732,7 @@ const NAV = [
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
 
-const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",tracking:"Live Posts",analytics:"Analytics Import",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
+const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",tracking:"Live Posts",analytics:"Analytics Import",dna:"Content DNA",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
 
 export default function App() {
   const [page,setPage] = useState("dashboard");
@@ -1556,6 +1836,7 @@ export default function App() {
             {page==="engine"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
             {page==="analytics"&&<AnalyticsPage mind={mind} setMind={setMind} formats={formats}/>}
+            {page==="dna"&&<ContentDNAPage mind={mind} setMind={setMind} formats={formats} setFormats={setFormats}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
             {page==="mind"&&<MyMind mind={mind} setMind={setMind}/>}
