@@ -962,6 +962,238 @@ function ContentLibrary({ assets, setAssets }) {
   );
 }
 
+// ─── ANALYTICS API FUNCTIONS ─────────────────────────────────────────────────
+async function pullInstagramAnalytics(token) {
+  const meRes = await fetch(`https://graph.instagram.com/me?fields=id,username&access_token=${encodeURIComponent(token)}`);
+  const me = await meRes.json();
+  if (me.error) throw new Error("Instagram auth failed: " + me.error.message);
+  const mediaRes = await fetch(`https://graph.instagram.com/${me.id}/media?fields=id,caption,media_type,timestamp,permalink,like_count,comments_count&limit=50&access_token=${encodeURIComponent(token)}`);
+  const media = await mediaRes.json();
+  if (media.error) throw new Error("Instagram media failed: " + media.error.message);
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-90);
+  const recent = (media.data||[]).filter(p=>new Date(p.timestamp)>cutoff);
+  const posts = await Promise.all(recent.map(async p=>{
+    try {
+      const ins = await fetch(`https://graph.instagram.com/${p.id}/insights?metric=impressions,reach,saved&access_token=${encodeURIComponent(token)}`);
+      const id = await ins.json();
+      const get = name=>(id.data||[]).find(m=>m.name===name)?.values?.[0]?.value||0;
+      return { id:p.id, caption:p.caption||"", media_type:p.media_type, timestamp:p.timestamp, permalink:p.permalink, likes:p.like_count||0, comments:p.comments_count||0, impressions:get("impressions"), reach:get("reach"), saved:get("saved") };
+    } catch { return { id:p.id, caption:p.caption||"", media_type:p.media_type, timestamp:p.timestamp, permalink:p.permalink, likes:p.like_count||0, comments:p.comments_count||0, impressions:0, reach:0, saved:0 }; }
+  }));
+  const totalImpressions=posts.reduce((s,p)=>s+p.impressions,0);
+  const totalSaves=posts.reduce((s,p)=>s+p.saved,0);
+  return { platform:"Instagram", username:me.username, scrapedAt:new Date().toISOString(), posts, summary:{ totalPosts:posts.length, totalImpressions, totalSaves, avgSaved:posts.length?Math.round(totalSaves/posts.length):0 } };
+}
+
+async function pullFacebookAnalytics(token, pageId) {
+  const postsRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/posts?fields=id,message,created_time,permalink_url&limit=50&access_token=${encodeURIComponent(token)}`);
+  const postsData = await postsRes.json();
+  if (postsData.error) throw new Error("Facebook failed: " + postsData.error.message);
+  const posts = await Promise.all((postsData.data||[]).map(async p=>{
+    try {
+      const ins = await fetch(`https://graph.facebook.com/v19.0/${p.id}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${encodeURIComponent(token)}`);
+      const id = await ins.json();
+      const get = name=>(id.data||[]).find(m=>m.name===name)?.values?.[0]?.value||0;
+      return { id:p.id, message:p.message||"", created_time:p.created_time, permalink_url:p.permalink_url, impressions:get("post_impressions"), engagedUsers:get("post_engaged_users"), clicks:get("post_clicks") };
+    } catch { return { id:p.id, message:p.message||"", created_time:p.created_time, permalink_url:p.permalink_url, impressions:0, engagedUsers:0, clicks:0 }; }
+  }));
+  const totalImpressions=posts.reduce((s,p)=>s+p.impressions,0);
+  const totalClicks=posts.reduce((s,p)=>s+p.clicks,0);
+  return { platform:"Facebook", pageId, scrapedAt:new Date().toISOString(), posts, summary:{ totalPosts:posts.length, totalImpressions, totalClicks } };
+}
+
+async function pullYouTubeAnalytics(apiKey, channelId) {
+  const searchRes = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&maxResults=50&order=date&type=video&key=${apiKey}`);
+  const search = await searchRes.json();
+  if (search.error) throw new Error("YouTube failed: " + search.error.message);
+  const ids = (search.items||[]).map(i=>i.id.videoId).filter(Boolean);
+  if (!ids.length) return { platform:"YouTube", channelId, scrapedAt:new Date().toISOString(), videos:[], summary:{totalVideos:0,totalViews:0,avgViews:0} };
+  const statsRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet&id=${ids.join(",")}&key=${apiKey}`);
+  const stats = await statsRes.json();
+  const videos = (stats.items||[]).map(v=>({ id:v.id, title:v.snippet?.title||"", publishedAt:v.snippet?.publishedAt||"", viewCount:Number(v.statistics?.viewCount||0), likeCount:Number(v.statistics?.likeCount||0), commentCount:Number(v.statistics?.commentCount||0), url:`https://youtube.com/watch?v=${v.id}` }));
+  const totalViews=videos.reduce((s,v)=>s+v.viewCount,0);
+  return { platform:"YouTube", channelId, scrapedAt:new Date().toISOString(), videos, summary:{ totalVideos:videos.length, totalViews, avgViews:videos.length?Math.round(totalViews/videos.length):0 } };
+}
+
+async function analyzeAnalytics(data, mind, formats) {
+  const raw = await callClaude(
+    `You are the BGB Content Intelligence agent. Analyse platform analytics for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\nPrimary signals: saves (Instagram), clicks (Facebook), views (YouTube). Return ONLY valid JSON: {"platform":"...","topPosts":[{"id":"...","title":"...","whyItWorked":"...","signal":"high|medium|low"}],"themes":["..."],"hookPatterns":["..."],"bestPostingTime":"...","insights":["..."],"recommendations":[{"text":"...","category":"framework|contrarian|language"}]}`,
+    `Analytics data:\n${JSON.stringify(data)}`,
+    4000
+  );
+  return JSON.parse(raw);
+}
+
+// ─── ANALYTICS PAGE ──────────────────────────────────────────────────────────
+function AnalyticsPage({ mind, setMind, formats }) {
+  const [igToken,setIgToken] = useState(()=>localStorage.getItem("bgb_ig_token")||"");
+  const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false);
+  const [fbToken,setFbToken] = useState(()=>localStorage.getItem("bgb_fb_token")||"");
+  const [fbPageId,setFbPageId] = useState(()=>localStorage.getItem("bgb_fb_page_id")||"");
+  const [fbData,setFbData] = useState(null); const [fbLoading,setFbLoading] = useState(false); const [fbErr,setFbErr] = useState(""); const [fbAnalysis,setFbAnalysis] = useState(null); const [fbALoading,setFbALoading] = useState(false);
+  const [ytKey,setYtKey] = useState(()=>localStorage.getItem("bgb_yt_key")||"");
+  const [ytChannelId,setYtChannelId] = useState(()=>localStorage.getItem("bgb_yt_channel_id")||"");
+  const [ytData,setYtData] = useState(null); const [ytLoading,setYtLoading] = useState(false); const [ytErr,setYtErr] = useState(""); const [ytAnalysis,setYtAnalysis] = useState(null); const [ytALoading,setYtALoading] = useState(false);
+
+  const pullIG = async () => {
+    if(!igToken.trim()) return;
+    localStorage.setItem("bgb_ig_token",igToken);
+    setIgLoading(true); setIgErr(""); setIgData(null); setIgAnalysis(null);
+    try { setIgData(await pullInstagramAnalytics(igToken)); }
+    catch(e){ setIgErr(e.message); } finally { setIgLoading(false); }
+  };
+  const pullFB = async () => {
+    if(!fbToken.trim()||!fbPageId.trim()) return;
+    localStorage.setItem("bgb_fb_token",fbToken); localStorage.setItem("bgb_fb_page_id",fbPageId);
+    setFbLoading(true); setFbErr(""); setFbData(null); setFbAnalysis(null);
+    try { setFbData(await pullFacebookAnalytics(fbToken,fbPageId)); }
+    catch(e){ setFbErr(e.message); } finally { setFbLoading(false); }
+  };
+  const pullYT = async () => {
+    if(!ytKey.trim()||!ytChannelId.trim()) return;
+    localStorage.setItem("bgb_yt_key",ytKey); localStorage.setItem("bgb_yt_channel_id",ytChannelId);
+    setYtLoading(true); setYtErr(""); setYtData(null); setYtAnalysis(null);
+    try { setYtData(await pullYouTubeAnalytics(ytKey,ytChannelId)); }
+    catch(e){ setYtErr(e.message); } finally { setYtLoading(false); }
+  };
+
+  const runAnalysis = async (data, setAnalysis, setALoading) => {
+    setALoading(true);
+    try { setAnalysis(await analyzeAnalytics(data,mind,formats)); }
+    catch(e){ alert("Analysis failed: "+e.message); } finally { setALoading(false); }
+  };
+
+  const addToMind = (rec) => {
+    const entry = { id:Date.now(), title:"From "+rec.category+" analysis", body:rec.text, tags:["analytics","auto"] };
+    const key = rec.category==="contrarian"?"contrarian":"frameworks";
+    setMind(m=>({...m,[key]:[...m[key],entry]}));
+  };
+
+  const sigCol = {high:"ts",medium:"tg",low:"tr"};
+
+  const AnalysisPanel = ({analysis, onAddToMind}) => analysis&&(
+    <div className="rp mt16">
+      <div className="ct" style={{fontSize:13}}>🤖 Agent Analysis — {analysis.platform}</div>
+      {analysis.insights?.length>0&&<div className="mb12">{analysis.insights.map((ins,i)=><div key={i} className="li" style={{padding:"7px 0"}}><div style={{color:"var(--gold)",marginRight:8,flexShrink:0}}>→</div><div className="sm">{ins}</div></div>)}</div>}
+      {analysis.themes?.length>0&&<div className="mb12"><div className="xs muted mb6">Top themes</div><div className="f g4x fw">{analysis.themes.map(t=><span key={t} className="tag tg">{t}</span>)}</div></div>}
+      {analysis.hookPatterns?.length>0&&<div className="mb12"><div className="xs muted mb6">Hook patterns that worked</div>{analysis.hookPatterns.map((h,i)=><div key={i} className="sm mb4">· {h}</div>)}</div>}
+      {analysis.bestPostingTime&&<div className="mb12"><div className="xs muted mb4">Best posting time</div><span className="tag tb">{analysis.bestPostingTime}</span></div>}
+      {analysis.recommendations?.length>0&&<div><div className="xs muted mb8">Recommendations — add to Mind Bank</div>{analysis.recommendations.map((r,i)=>(
+        <div key={i} className="f fac g8 mb8">
+          <div className="sm" style={{flex:1}}>{r.text}</div>
+          <span className="tag ti">{r.category}</span>
+          <button className="btn bsa bsm" onClick={()=>onAddToMind(r)}>+ Mind</button>
+        </div>
+      ))}</div>}
+    </div>
+  );
+
+  const PostList = ({posts, sigKey, labelKey}) => {
+    const sorted = [...(posts||[])].sort((a,b)=>b[sigKey]-a[sigKey]).slice(0,10);
+    return sorted.map((p,i)=>(
+      <div key={p.id} className="li">
+        <div className="lidate xs muted">{i+1}</div>
+        <div className="libody">
+          <div className="lititle" style={{fontSize:12.5}}>{(p.caption||p.message||p.title||"").slice(0,100)}</div>
+          <div className="limetrics mt4">
+            <span className="mp hl"><strong>{p[sigKey]}</strong> {sigKey}</span>
+            {p.impressions>0&&<span className="mp"><strong>{p.impressions?.toLocaleString()}</strong> imp</span>}
+            {p.permalink&&<a href={p.permalink} target="_blank" rel="noreferrer" className="xs muted">↗</a>}
+            {p.permalink_url&&<a href={p.permalink_url} target="_blank" rel="noreferrer" className="xs muted">↗</a>}
+            {p.url&&<a href={p.url} target="_blank" rel="noreferrer" className="xs muted">↗</a>}
+          </div>
+        </div>
+      </div>
+    ));
+  };
+
+  return (
+    <div>
+      <div className="alert av mb20"><strong>Analytics Import</strong> — pull post data from each platform. The agent analyses what's working and surfaces insights you can add directly to Your Mind Bank.</div>
+
+      {/* ── INSTAGRAM ── */}
+      <div className="card mb16">
+        <div className="ct">📸 Instagram <span className="xs muted" style={{fontWeight:400}}>Graph API</span>
+          {igData&&<span className="tag ts mla">Connected — @{igData.username}</span>}
+        </div>
+        <div className="f fac g8 mb12">
+          <input type="password" className="inp" style={{flex:1}} placeholder="Access token (paste from Graph API Explorer)" value={igToken} onChange={e=>setIgToken(e.target.value)}/>
+          <button className="btn bp" onClick={pullIG} disabled={igLoading||!igToken.trim()}>{igLoading?<><span className="spin"/> Pulling...</>:"Pull Instagram →"}</button>
+        </div>
+        {igErr&&<div className="alert ar mb12">{igErr}</div>}
+        {igData&&<>
+          <div className="g4 mb16">
+            <div className="sc gold"><div className="sl">Posts (90d)</div><div className="sv">{igData.summary.totalPosts}</div></div>
+            <div className="sc sage"><div className="sl">Total Saves</div><div className="sv">{igData.summary.totalSaves}</div></div>
+            <div className="sc rust"><div className="sl">Avg Saves</div><div className="sv">{igData.summary.avgSaved}</div></div>
+            <div className="sc violet"><div className="sl">Impressions</div><div className="sv">{igData.summary.totalImpressions.toLocaleString()}</div></div>
+          </div>
+          <div className="ct" style={{fontSize:13}}>Top 10 by Saves</div>
+          <PostList posts={igData.posts} sigKey="saved" labelKey="saved"/>
+          <div className="mt12">
+            <button className="btn bp" onClick={()=>runAnalysis(igData,setIgAnalysis,setIgALoading)} disabled={igALoading}>{igALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
+          </div>
+          <AnalysisPanel analysis={igAnalysis} onAddToMind={addToMind}/>
+        </>}
+      </div>
+
+      {/* ── FACEBOOK ── */}
+      <div className="card mb16">
+        <div className="ct">👥 Facebook Page <span className="xs muted" style={{fontWeight:400}}>Graph API</span>
+          {fbData&&<span className="tag tb mla">Connected — {fbData.pageId}</span>}
+        </div>
+        <div className="f fac g8 mb8">
+          <input type="password" className="inp" style={{flex:2}} placeholder="Page access token" value={fbToken} onChange={e=>setFbToken(e.target.value)}/>
+          <input className="inp" style={{flex:1}} placeholder="Page ID or username" value={fbPageId} onChange={e=>setFbPageId(e.target.value)}/>
+          <button className="btn bp" onClick={pullFB} disabled={fbLoading||!fbToken.trim()||!fbPageId.trim()}>{fbLoading?<><span className="spin"/> Pulling...</>:"Pull Facebook →"}</button>
+        </div>
+        <div className="xs muted mb12">Find your Page ID: go to your Facebook Page → About → scroll to Page Transparency → Page ID</div>
+        {fbErr&&<div className="alert ar mb12">{fbErr}</div>}
+        {fbData&&<>
+          <div className="g3 mb16">
+            <div className="sc gold"><div className="sl">Posts</div><div className="sv">{fbData.summary.totalPosts}</div></div>
+            <div className="sc sage"><div className="sl">Total Clicks</div><div className="sv">{fbData.summary.totalClicks}</div></div>
+            <div className="sc rust"><div className="sl">Impressions</div><div className="sv">{fbData.summary.totalImpressions.toLocaleString()}</div></div>
+          </div>
+          <div className="ct" style={{fontSize:13}}>Top 10 by Clicks</div>
+          <PostList posts={fbData.posts} sigKey="clicks" labelKey="clicks"/>
+          <div className="mt12">
+            <button className="btn bp" onClick={()=>runAnalysis(fbData,setFbAnalysis,setFbALoading)} disabled={fbALoading}>{fbALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
+          </div>
+          <AnalysisPanel analysis={fbAnalysis} onAddToMind={addToMind}/>
+        </>}
+      </div>
+
+      {/* ── YOUTUBE ── */}
+      <div className="card mb16">
+        <div className="ct">▶️ YouTube <span className="xs muted" style={{fontWeight:400}}>Data API v3</span>
+          {ytData&&<span className="tag tr mla">Connected — {ytData.summary.totalVideos} videos</span>}
+        </div>
+        <div className="f fac g8 mb8">
+          <input type="password" className="inp" style={{flex:2}} placeholder="API Key (from Google Cloud Console)" value={ytKey} onChange={e=>setYtKey(e.target.value)}/>
+          <input className="inp" style={{flex:1}} placeholder="Channel ID (UCxxxx...)" value={ytChannelId} onChange={e=>setYtChannelId(e.target.value)}/>
+          <button className="btn bp" onClick={pullYT} disabled={ytLoading||!ytKey.trim()||!ytChannelId.trim()}>{ytLoading?<><span className="spin"/> Pulling...</>:"Pull YouTube →"}</button>
+        </div>
+        <div className="xs muted mb12">Channel ID: youtube.com/channel/<strong>UCxxxx</strong> — or go to YouTube Studio → Settings → Channel → Advanced</div>
+        {ytErr&&<div className="alert ar mb12">{ytErr}</div>}
+        {ytData&&<>
+          <div className="g3 mb16">
+            <div className="sc gold"><div className="sl">Videos</div><div className="sv">{ytData.summary.totalVideos}</div></div>
+            <div className="sc sage"><div className="sl">Total Views</div><div className="sv">{ytData.summary.totalViews.toLocaleString()}</div></div>
+            <div className="sc rust"><div className="sl">Avg Views</div><div className="sv">{ytData.summary.avgViews.toLocaleString()}</div></div>
+          </div>
+          <div className="ct" style={{fontSize:13}}>Top 10 by Views</div>
+          <PostList posts={ytData.videos} sigKey="viewCount" labelKey="views"/>
+          <div className="mt12">
+            <button className="btn bp" onClick={()=>runAnalysis(ytData,setYtAnalysis,setYtALoading)} disabled={ytALoading}>{ytALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
+          </div>
+          <AnalysisPanel analysis={ytAnalysis} onAddToMind={addToMind}/>
+        </>}
+      </div>
+    </div>
+  );
+}
+
 function GeneratePage({ mind, formats, assets, addToQueue, setPage }) {
   const [raw, setRaw] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1101,6 +1333,7 @@ const NAV = [
   {sec:"Intelligence"},
   {id:"review",label:"Review Queue",icon:"◐",badge:"review"},
   {id:"report",label:"Weekly Report",icon:"📊"},
+  {id:"analytics",label:"Analytics",icon:"📈"},
   {sec:"Knowledge Banks"},
   {id:"mind",label:"Your Mind",icon:"🧠"},
   {id:"whatworks",label:"What Works",icon:"✦"},
@@ -1108,7 +1341,7 @@ const NAV = [
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
 
-const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Live Posts",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",input:"Content Library"};
+const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Live Posts",review:"7-Day Review Queue",report:"Weekly Agent Report",analytics:"Analytics Import",mind:"Your Mind Bank",whatworks:"What Works Bank",input:"Content Library"};
 
 export default function App() {
   const [page,setPage] = useState("dashboard");
@@ -1200,6 +1433,7 @@ export default function App() {
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
+            {page==="analytics"&&<AnalyticsPage mind={mind} setMind={setMind} formats={formats}/>}
             {page==="mind"&&<MyMind mind={mind} setMind={setMind}/>}
             {page==="whatworks"&&<WhatWorksBank formats={formats} setFormats={setFormats} mind={mind}/>}
             {page==="input"&&<ContentLibrary assets={assets} setAssets={setAssets}/>}
