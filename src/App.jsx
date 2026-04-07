@@ -1083,9 +1083,6 @@ async function analyzeAnalytics(data, mind, formats) {
 function AnalyticsPage({ mind, setMind, formats }) {
   const [igToken,setIgToken] = useState(()=>localStorage.getItem("bgb_ig_token")||"");
   const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false);
-  const [fbToken,setFbToken] = useState(()=>localStorage.getItem("bgb_fb_token")||"");
-  const [fbPageId,setFbPageId] = useState(()=>localStorage.getItem("bgb_fb_page_id")||"");
-  const [fbData,setFbData] = useState(null); const [fbLoading,setFbLoading] = useState(false); const [fbErr,setFbErr] = useState(""); const [fbAnalysis,setFbAnalysis] = useState(null); const [fbALoading,setFbALoading] = useState(false);
   const [ytKey,setYtKey] = useState(()=>localStorage.getItem("bgb_yt_key")||"");
   const [ytChannelId,setYtChannelId] = useState(()=>localStorage.getItem("bgb_yt_channel_id")||"");
   const [ytData,setYtData] = useState(null); const [ytLoading,setYtLoading] = useState(false); const [ytErr,setYtErr] = useState(""); const [ytAnalysis,setYtAnalysis] = useState(null); const [ytALoading,setYtALoading] = useState(false);
@@ -1096,13 +1093,6 @@ function AnalyticsPage({ mind, setMind, formats }) {
     setIgLoading(true); setIgErr(""); setIgData(null); setIgAnalysis(null);
     try { setIgData(await pullInstagramAnalytics(igToken)); }
     catch(e){ setIgErr(e.message); } finally { setIgLoading(false); }
-  };
-  const pullFB = async () => {
-    if(!fbToken.trim()||!fbPageId.trim()) return;
-    localStorage.setItem("bgb_fb_token",fbToken); localStorage.setItem("bgb_fb_page_id",fbPageId);
-    setFbLoading(true); setFbErr(""); setFbData(null); setFbAnalysis(null);
-    try { setFbData(await pullFacebookAnalytics(fbToken,fbPageId)); }
-    catch(e){ setFbErr(e.message); } finally { setFbLoading(false); }
   };
   const pullYT = async () => {
     if(!ytKey.trim()||!ytChannelId.trim()) return;
@@ -1189,33 +1179,6 @@ function AnalyticsPage({ mind, setMind, formats }) {
             <button className="btn bp" onClick={()=>runAnalysis(igData,setIgAnalysis,setIgALoading)} disabled={igALoading}>{igALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
           </div>
           <AnalysisPanel analysis={igAnalysis} onAddToMind={addToMind}/>
-        </>}
-      </div>
-
-      {/* ── FACEBOOK ── */}
-      <div className="card mb16">
-        <div className="ct">👥 Facebook Page <span className="xs muted" style={{fontWeight:400}}>Graph API</span>
-          {fbData&&<span className="tag tb mla">Connected — {fbData.pageId}</span>}
-        </div>
-        <div className="f fac g8 mb8">
-          <input type="password" className="inp" style={{flex:2}} placeholder="Page access token" value={fbToken} onChange={e=>setFbToken(e.target.value)}/>
-          <input className="inp" style={{flex:1}} placeholder="Page ID or username" value={fbPageId} onChange={e=>setFbPageId(e.target.value)}/>
-          <button className="btn bp" onClick={pullFB} disabled={fbLoading||!fbToken.trim()||!fbPageId.trim()}>{fbLoading?<><span className="spin"/> Pulling...</>:"Pull Facebook →"}</button>
-        </div>
-        <div className="xs muted mb12">Find your Page ID: go to your Facebook Page → About → scroll to Page Transparency → Page ID</div>
-        {fbErr&&<div className="alert ar mb12">{fbErr}</div>}
-        {fbData&&<>
-          <div className="g3 mb16">
-            <div className="sc gold"><div className="sl">Posts</div><div className="sv">{fbData.summary.totalPosts}</div></div>
-            <div className="sc sage"><div className="sl">Total Clicks</div><div className="sv">{fbData.summary.totalClicks}</div></div>
-            <div className="sc rust"><div className="sl">Impressions</div><div className="sv">{fbData.summary.totalImpressions.toLocaleString()}</div></div>
-          </div>
-          <div className="ct" style={{fontSize:13}}>Top 10 by Clicks</div>
-          <PostList posts={fbData.posts} sigKey="clicks" labelKey="clicks"/>
-          <div className="mt12">
-            <button className="btn bp" onClick={()=>runAnalysis(fbData,setFbAnalysis,setFbALoading)} disabled={fbALoading}>{fbALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
-          </div>
-          <AnalysisPanel analysis={fbAnalysis} onAddToMind={addToMind}/>
         </>}
       </div>
 
