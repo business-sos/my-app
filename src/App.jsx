@@ -264,7 +264,7 @@ function bpCtx(bp) {
 
 async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[], writingRules="") {
   const raw2 = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nIf no theme/format specified, pick the best ones from the knowledge banks. Return ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nIf no theme/format specified, pick the best ones from the knowledge banks.\nCTA RULE: Every variation MUST end with a CTA line pointing to bgb.coach/offer. Each variation must use a DIFFERENT CTA angle so we can test which converts best. Vary the wording — examples: "Get the full framework → bgb.coach/offer" / "See exactly how we fixed this → bgb.coach/offer" / "The BGB playbook behind this → bgb.coach/offer" / "If this sounds like your business → bgb.coach/offer". Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3\n\nCTA LINE","cta":"CTA LINE"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post\n\nCTA LINE","cta":"CTA LINE"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
     `Raw input:\n${raw||"Pick the most compelling BGB topic right now based on the knowledge banks."}\n\nTheme: ${theme||"auto-pick best"}\nFormat: ${fmt||"auto-pick best"}`,
     3000
   );
@@ -273,7 +273,7 @@ async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[], writing
 
 async function genWeekPosts(mind, formats, writingRules="") {
   const raw = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\nCTA RULE: Every post MUST end with a CTA line pointing to bgb.coach/offer. Each of the 5 posts must use a DIFFERENT CTA angle to test which converts best — vary the wording and tone. Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks\\n\\nCTA LINE","cta":"CTA LINE","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
     `Generate 5 varied LinkedIn posts for the week. Cover different angles of the BGB positioning — delegation, GM install, owner freedom, founder trap, scaling. Mix proven and testing formats.`,
     4000
   );
@@ -1747,6 +1747,18 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules
 }
 
 function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
+  const [edits, setEdits] = useState(()=>
+    contentQueue.reduce((acc,item)=>({...acc,[item.id]:item.content}),[])
+  );
+  // Keep edits in sync when new items arrive
+  useEffect(()=>{
+    setEdits(prev=>{
+      const next={...prev};
+      contentQueue.forEach(item=>{ if(next[item.id]===undefined) next[item.id]=item.content; });
+      return next;
+    });
+  },[contentQueue]);
+
   if (contentQueue.length === 0) {
     return (
       <div className="card" style={{textAlign:"center",padding:56}}>
@@ -1759,7 +1771,7 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
   return (
     <div>
       <div className="alert ag mb16">
-        <strong>{contentQueue.length} post{contentQueue.length!==1?"s":""} queued.</strong> Hit Copy & Post when you're ready to go live — copies the content and creates a tracking entry automatically.
+        <strong>{contentQueue.length} post{contentQueue.length!==1?"s":""} queued.</strong> Review the full post including CTA, edit if needed, then hit Copy & Post — content goes to clipboard with the tracked link injected automatically.
       </div>
       {contentQueue.map(item=>(
         <div key={item.id} className="card mb12">
@@ -1770,11 +1782,21 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
             <span className="xs muted mla">{new Date(item.addedAt).toLocaleDateString("en-AU",{day:"numeric",month:"short"})}</span>
           </div>
           {item.hook&&<div style={{fontWeight:600,fontSize:13.5,marginBottom:8}}>{item.hook}</div>}
-          <div className="vt mb12" style={{maxHeight:200,overflow:"hidden",WebkitMaskImage:"linear-gradient(to bottom,black 70%,transparent)"}}>{item.content}</div>
-          {item.rationale&&<div className="xs muted mb12" style={{fontStyle:"italic"}}>Why now: {item.rationale}</div>}
+          <textarea
+            className="ta"
+            style={{minHeight:220,fontSize:13,lineHeight:1.7,marginBottom:8}}
+            value={edits[item.id]??item.content}
+            onChange={e=>setEdits(prev=>({...prev,[item.id]:e.target.value}))}
+          />
+          {item.cta&&(
+            <div style={{background:"rgba(201,168,76,0.08)",border:"1px solid rgba(201,168,76,0.3)",borderRadius:2,padding:"8px 12px",marginBottom:10}}>
+              <div className="xs" style={{fontFamily:"DM Mono,monospace",color:"var(--gold)",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>CTA being tested</div>
+              <div className="xs" style={{color:"var(--ink)"}}>{item.cta}</div>
+            </div>
+          )}
+          {item.rationale&&<div className="xs muted mb10" style={{fontStyle:"italic"}}>Why now: {item.rationale}</div>}
           <div className="f g8">
-            <button className="btn bg" onClick={()=>postFromQueue(item)}>Copy & Post →</button>
-            <CopyBtn text={item.content}/>
+            <button className="btn bg" onClick={()=>postFromQueue(item, edits[item.id])}>Copy & Post →</button>
             <button className="btn bgh bsm mla" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>Remove</button>
           </div>
         </div>
@@ -1884,6 +1906,7 @@ export default function App() {
       id: Date.now()+Math.random(),
       content: variation.content,
       hook: variation.hook,
+      cta: variation.cta||"",
       platform: variation.platform||"LinkedIn",
       format: variation.format||meta.format||"",
       theme: meta.theme||"",
@@ -1892,19 +1915,25 @@ export default function App() {
     }]);
   };
 
-  const postFromQueue = (item) => {
-    navigator.clipboard.writeText(item.content).catch(()=>{});
+  const postFromQueue = (item, editedText) => {
+    const postId = Date.now();
+    const trackedLink = `bgb.coach/offer?ref=${postId}`;
+    const baseText = (editedText !== undefined ? editedText : item.content) || item.content;
+    // Inject ?ref into any bare bgb.coach/offer links in the content
+    const finalContent = baseText.replace(/bgb\.coach\/offer(?!\?ref=)/g, trackedLink);
+    navigator.clipboard.writeText(finalContent).catch(()=>{});
     const newPost = {
-      id: Date.now(),
-      title: item.hook?.slice(0,60)||item.content.split('\n')[0].slice(0,60),
+      id: postId,
+      title: item.hook?.slice(0,60)||finalContent.split('\n')[0].slice(0,60),
       date: new Date().toISOString().slice(0,10),
       platform: item.platform,
       status: "published",
-      content: item.content,
+      content: finalContent,
       theme: item.theme,
       format: item.format,
+      cta: item.cta||"",
       impressions: 0, engagement: 0, docViews: 0, calls: 0,
-      trackedLink: `bgb.coach/offer?ref=${Date.now()}`,
+      trackedLink,
       url: "", isTest: false, testGroup: null, proven: false, daysLive: 0,
     };
     setPosts(p=>[newPost,...p]);
