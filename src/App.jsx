@@ -800,12 +800,28 @@ function Publishing({ posts, setPosts, reviewQueue, setReviewQueue }) {
   );
 }
 
-function Tracking({ posts, setPosts }) {
+function Tracking({ posts, setPosts, offerDocUrl, setOfferDocUrl }) {
   const published = posts.filter(p=>p.status==="published");
   const platforms = ["All", ...Array.from(new Set(published.map(p=>p.platform)))];
   const [tab, setTab] = useState("All");
   const [draft, setDraft] = useState({});
   const [saved, setSaved] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [localDocUrl, setLocalDocUrl] = useState(offerDocUrl||"");
+
+  const syncDocViews = async () => {
+    setSyncLoading(true); setSyncMsg("");
+    try {
+      const ids = published.map(p=>p.id).join(",");
+      const res = await fetch(`/api/counts?ids=${ids}`);
+      const counts = await res.json();
+      setPosts(prev=>prev.map(p=>counts[p.id]!==undefined?{...p,docViews:counts[p.id]}:p));
+      setSyncMsg(`↻ Synced ${Object.keys(counts).length} posts`);
+    } catch(e) {
+      setSyncMsg("Sync failed — check Upstash env vars are set in Vercel");
+    } finally { setSyncLoading(false); }
+  };
 
   const visible = tab === "All" ? published : published.filter(p=>p.platform===tab);
 
@@ -838,6 +854,36 @@ function Tracking({ posts, setPosts }) {
 
   return (
     <div>
+      {/* Offer doc URL + sync */}
+      <div className="card mb16">
+        <div className="ct">🔗 Offer Doc &amp; Doc View Tracking</div>
+        <div className="f fac g10 mb8">
+          <input
+            className="inp"
+            placeholder="https://docs.google.com/document/d/... — paste once, used in all tracked links"
+            value={localDocUrl}
+            onChange={e=>setLocalDocUrl(e.target.value)}
+            style={{flex:1}}
+          />
+          <button className="btn bg bsm" onClick={()=>setOfferDocUrl(localDocUrl)} disabled={localDocUrl===offerDocUrl||!localDocUrl}>
+            Save URL
+          </button>
+          <button
+            className="btn bp bsm"
+            disabled={syncLoading||!offerDocUrl||published.length===0}
+            onClick={syncDocViews}
+          >
+            {syncLoading?"Syncing…":"↻ Sync Doc Views"}
+          </button>
+          {syncMsg&&<span className="xs" style={{color:"var(--sage)",fontFamily:"DM Mono,monospace"}}>{syncMsg}</span>}
+        </div>
+        <div className="xs muted">
+          {offerDocUrl
+            ? <span>✓ Tracked link active — new posts route through <code style={{fontSize:11}}>/api/track</code> → your doc. Click "↻ Sync Doc Views" to pull click counts into the table below.</span>
+            : <span>Paste your Google Doc URL above. Every post you send from the Queue will get a tracked link that counts clicks automatically.</span>}
+        </div>
+      </div>
+
       {/* weekly checklist banner */}
       <div className="alert ag mb16">
         <strong>Weekly data drop.</strong> Open each platform, copy the numbers in, hit Save All. Should take under 5 minutes.
@@ -1837,6 +1883,8 @@ export default function App() {
   const [bestPractice,setBestPractice] = useState(SEED_BESTPRACTICE);
   const [analyticsImport,setAnalyticsImport] = useState(null);
   const [instagramImport,setInstagramImport] = useState(null);
+  const [offerDocUrl,setOfferDocUrl] = useState(()=>localStorage.getItem("offerDocUrl")||"");
+  useEffect(()=>{ localStorage.setItem("offerDocUrl",offerDocUrl); },[offerDocUrl]);
   const [contentQueue,setContentQueue] = useState([]);
   useEffect(()=>{
     const handler = e => { setAnalyticsImport(e.detail); setPage("analytics"); };
@@ -1871,7 +1919,9 @@ export default function App() {
       theme: item.theme,
       format: item.format,
       impressions: 0, engagement: 0, docViews: 0, calls: 0,
-      trackedLink: `bgb.co/p${Date.now().toString().slice(-4)}`,
+      trackedLink: offerDocUrl
+        ? `${window.location.origin}/api/track?id=${Date.now()}&to=${encodeURIComponent(offerDocUrl)}`
+        : `bgb.co/p${Date.now().toString().slice(-4)}`,
       url: "", isTest: false, testGroup: null, proven: false, daysLive: 0,
     };
     setPosts(p=>[newPost,...p]);
@@ -1924,7 +1974,7 @@ export default function App() {
             {page==="generate"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage} writingRules={writingRules}/>}
             {page==="queue"&&<ContentQueuePage contentQueue={contentQueue} setContentQueue={setContentQueue} postFromQueue={postFromQueue}/>}
             {page==="engine"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage} writingRules={writingRules}/>}
-            {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
+            {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts} offerDocUrl={offerDocUrl} setOfferDocUrl={setOfferDocUrl}/>}
             {page==="analytics"&&<AnalyticsPage mind={mind} setMind={setMind} formats={formats}/>}
             {page==="dna"&&<ContentDNAPage mind={mind} setMind={setMind} formats={formats} setFormats={setFormats}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
