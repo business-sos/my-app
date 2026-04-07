@@ -244,17 +244,17 @@ function bpCtx(bp) {
 
 async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[]) {
   const raw2 = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\nIf no theme or format is specified, auto-pick the best ones from the knowledge banks. Return ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \\n for line breaks in content. Format: {"chosenTheme":"...","chosenFormat":"...","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\\nline2\\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nIf no theme/format specified, pick the best ones from the knowledge banks. Return ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
     `Raw input:\n${raw||"Pick the most compelling BGB topic right now based on the knowledge banks."}\n\nTheme: ${theme||"auto-pick best"}\nFormat: ${fmt||"auto-pick best"}`,
     3000
   );
   return JSON.parse(raw2);
 }
 
-async function genWeekPosts(mind, formats) {
+async function genWeekPosts(mind, formats, bestPractice) {
   const raw = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\nGenerate 5 LinkedIn posts for this week — each on a DIFFERENT theme, each using the best format for that theme. Return ONLY valid JSON (no extra text, no markdown): {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks","rationale":"one sentence why this theme+format combo works right now"}]}`,
-    `Generate 5 varied LinkedIn posts for Stephen's week. Cover different angles: delegation, GM install, owner freedom, contrarian takes, client stories. Each should be distinctly different in angle and approach.`,
+    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
+    `Generate 5 varied LinkedIn posts for the week. Cover different angles of the BGB positioning — delegation, GM install, owner freedom, founder trap, scaling. Mix proven and testing formats.`,
     4000
   );
   return JSON.parse(raw);
@@ -1398,7 +1398,7 @@ const NAV = [
   {id:"input",label:"Content Input",icon:"✍️"},
 ];
 
-const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",engine:"Content Engine",publish:"Publishing Workflow",tracking:"Live Posts",review:"7-Day Review Queue",report:"Weekly Agent Report",analytics:"Analytics Import",mind:"Your Mind Bank",whatworks:"What Works Bank",input:"Content Library"};
+const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",tracking:"Live Posts",analytics:"Analytics Import",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
 
 export default function App() {
   const [page,setPage] = useState("dashboard");
@@ -1410,9 +1410,15 @@ export default function App() {
   const [mind,setMind] = useState(SEED_MIND);
   const [formats,setFormats] = useState(SEED_FORMATS);
   const [reviewQueue,setReviewQueue] = useState(SEED_REVIEW);
+  const [bestPractice,setBestPractice] = useState(SEED_BESTPRACTICE);
+  const [analyticsImport,setAnalyticsImport] = useState(null);
+  const [instagramImport,setInstagramImport] = useState(null);
   const [contentQueue,setContentQueue] = useState([]);
-  const [engineState,setEngineState] = useState({});
-
+  useEffect(()=>{
+    const handler = e => { setAnalyticsImport(e.detail); setPage("analytics"); };
+    window.addEventListener("bgb-analytics-import", handler);
+    return ()=>window.removeEventListener("bgb-analytics-import", handler);
+  },[]);
   const pending = reviewQueue.filter(r=>r.status==="ready").length;
   const queueCount = contentQueue.length;
 
@@ -1448,10 +1454,17 @@ export default function App() {
     setContentQueue(q=>q.filter(qi=>qi.id!==item.id));
     const due = new Date(); due.setDate(due.getDate()+7);
     setReviewQueue(rq=>[...rq,{
-      id: Date.now()+1, postId: newPost.id, postTitle: newPost.title,
-      dueDate: due.toISOString().slice(0,10), status:"ready",
-      platform: newPost.platform, docViews:0, calls:0, impressions:0,
-      format: newPost.format, theme: newPost.theme, testGroup:null, aiProposal:null,
+      id: Date.now()+1,
+      postId: newPost.id,
+      postTitle: newPost.title,
+      dueDate: due.toISOString().slice(0,10),
+      status: "ready",
+      platform: newPost.platform,
+      docViews: 0, calls: 0, impressions: 0,
+      format: newPost.format,
+      theme: newPost.theme,
+      testGroup: null,
+      aiProposal: null,
     }]);
   };
 
@@ -1468,10 +1481,11 @@ export default function App() {
                 <span className="ni">{n.icon}</span>{n.label}
                 {n.badge==="review"&&pending>0&&<span className="sb-badge">{pending}</span>}
                 {n.badge==="queue"&&queueCount>0&&<span className="sb-badge">{queueCount}</span>}
+                {n.badge==="analytics"&&(analyticsImport||instagramImport)&&<span className="sb-badge">NEW</span>}
               </div>
             )}
           </nav>
-          <div className="sb-foot">Generate → Queue → Post<br/>→ Track → Review<br/>→ Learn → Repeat</div>
+          <div className="sb-foot">Generate → Queue → Post<br/>→ Track → Review → Repeat</div>
         </aside>
         <main className="main">
           <div className="topbar">
@@ -1483,10 +1497,9 @@ export default function App() {
           </div>
           <div className="pg">
             {page==="dashboard"&&<Dashboard posts={posts} formats={formats} reviewQueue={reviewQueue} contentQueue={contentQueue} setPage={setPage} postFromQueue={postFromQueue}/>}
-            {page==="generate"&&<GeneratePage mind={mind} formats={formats} assets={assets} addToQueue={addToQueue} setPage={setPage}/>}
+            {page==="generate"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage}/>}
             {page==="queue"&&<ContentQueuePage contentQueue={contentQueue} setContentQueue={setContentQueue} postFromQueue={postFromQueue}/>}
-            {page==="engine"&&<ContentEngine assets={assets} posts={posts} setPosts={setPosts} formats={formats} mind={mind} setPage={setPage} engineState={engineState} setEngineState={setEngineState}/>}
-            {page==="publish"&&<Publishing posts={posts} setPosts={setPosts} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue}/>}
+            {page==="engine"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
             {page==="analytics"&&<AnalyticsImport data={analyticsImport} setData={setAnalyticsImport} igData={instagramImport} setIgData={setInstagramImport} mind={mind} formats={formats} bestPractice={bestPractice} setBestPractice={setBestPractice} posts={posts} setPosts={setPosts} setPage={setPage}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
