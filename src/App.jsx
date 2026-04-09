@@ -1654,8 +1654,9 @@ async function analyzeFacebookHistory(posts, mind) {
 
 // ─── ANALYTICS PAGE ──────────────────────────────────────────────────────────
 function AnalyticsPage({ mind, setMind, formats, analyticsImport, setAnalyticsImport }) {
-  const [liData,setLiData] = useState(null); const [liErr,setLiErr] = useState(""); const [liAnalysis,setLiAnalysis] = useState(null); const [liALoading,setLiALoading] = useState(false);
+  const [liData,setLiData] = useState(()=>{try{const s=localStorage.getItem("bgb_li_data");return s?JSON.parse(s):null;}catch{return null;}}); const [liErr,setLiErr] = useState(""); const [liAnalysis,setLiAnalysis] = useState(null); const [liALoading,setLiALoading] = useState(false);
   const [liParsing,setLiParsing] = useState(false); const [liParseErr,setLiParseErr] = useState("");
+  useEffect(()=>{ if(liData) localStorage.setItem("bgb_li_data",JSON.stringify(liData)); else localStorage.removeItem("bgb_li_data"); },[liData]);
   const [igToken,setIgToken] = useState(()=>localStorage.getItem("bgb_ig_token")||"");
   const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false); const [igSetup,setIgSetup] = useState(false);
   const [fbPosts,setFbPosts] = useState([]); const [fbErr,setFbErr] = useState(""); const [fbAnalysis,setFbAnalysis] = useState(null); const [fbALoading,setFbALoading] = useState(false);

@@ -203,7 +203,7 @@ function linkedinScraperFn() {
       platform: 'LinkedIn',
       scrapedAt: new Date().toISOString(),
       url: location.href,
-      rawText: rawText.slice(0, 12000), // Claude will parse this
+      rawText: rawText.slice(0, 25000), // Claude will parse this
       postLinks,
       hints: { hasVideo, imgCount },
       summary: { totalImpressions: 0, followerChange: 0 },
@@ -212,15 +212,24 @@ function linkedinScraperFn() {
   }
 
   // ── SCROLL THEN EXTRACT ────────────────────────────────────────────────────
+  // Scroll through the page in steps, pausing at each position so LinkedIn's
+  // virtual DOM has time to render newly visible rows before moving on.
   return new Promise((resolve) => {
-    window.scrollTo({ top: 500, behavior: 'smooth' });
-    setTimeout(() => {
-      window.scrollTo({ top: 1200, behavior: 'smooth' });
-      setTimeout(() => {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        setTimeout(() => resolve(extractData()), 1500);
-      }, 700);
-    }, 600);
+    const step = async () => {
+      const positions = [400, 900, 1600, 2500, 3500,
+        document.body.scrollHeight * 0.4,
+        document.body.scrollHeight * 0.65,
+        document.body.scrollHeight * 0.85,
+        document.body.scrollHeight];
+      for (const pos of positions) {
+        window.scrollTo({ top: pos, behavior: 'smooth' });
+        await new Promise(r => setTimeout(r, 900));
+      }
+      // Final pause for the last batch of rows to finish rendering
+      await new Promise(r => setTimeout(r, 2000));
+      resolve(extractData());
+    };
+    step();
   });
 }
 
