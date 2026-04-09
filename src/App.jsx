@@ -1878,7 +1878,59 @@ const NAV = [
 
 const TITLES = {dashboard:"Dashboard",generate:"Generate Posts",queue:"Content Queue",tracking:"Live Posts",analytics:"Analytics Import",dna:"Content DNA",review:"7-Day Review Queue",report:"Weekly Agent Report",mind:"Your Mind Bank",whatworks:"What Works Bank",rules:"Writing Rules",bestpractice:"Best Practice Knowledge Bank",input:"Content Library"};
 
+const AUTH_KEY = "bgb_auth_v1";
+const CORRECT = import.meta.env.VITE_APP_PASSWORD;
+
+function PasswordGate({ onAuth }) {
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState(false);
+  const [shake, setShake] = useState(false);
+  const submit = () => {
+    if (val === CORRECT) {
+      localStorage.setItem(AUTH_KEY, "1");
+      onAuth();
+    } else {
+      setErr(true); setShake(true);
+      setTimeout(() => setShake(false), 500);
+    }
+  };
+  return (
+    <>
+      <style>{STYLE}</style>
+      <style>{`
+        @keyframes sh { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }
+        .shake { animation: sh 0.45s ease; }
+      `}</style>
+      <div style={{minHeight:"100vh",background:"var(--cream)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{width:340,textAlign:"center"}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,fontWeight:700,color:"var(--ink)",marginBottom:6}}>BGB</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:3,textTransform:"uppercase",color:"var(--ink60)",marginBottom:36}}>Content Intelligence</div>
+          <div className={`card ${shake?"shake":""}`} style={{padding:28}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,marginBottom:18,color:"var(--ink)"}}>Enter password to continue</div>
+            <input
+              className="inp"
+              type="password"
+              placeholder="Password"
+              value={val}
+              autoFocus
+              onChange={e=>{setVal(e.target.value);setErr(false);}}
+              onKeyDown={e=>e.key==="Enter"&&submit()}
+              style={err?{borderColor:"var(--rust)"}:{}}
+            />
+            {err&&<div style={{color:"var(--rust)",fontSize:11,fontFamily:"DM Mono,monospace",marginTop:6}}>Incorrect password</div>}
+            <button className="btn bp w100" style={{marginTop:14,padding:"10px 16px"}} onClick={submit}>Continue →</button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function App() {
+  const [authed, setAuthed] = useState(()=>{
+    if (!CORRECT) return true; // no password set — open access
+    return localStorage.getItem(AUTH_KEY) === "1";
+  });
   const [page,setPage] = useState("dashboard");
   const [posts,setPosts] = useState(SEED_POSTS);
   const [assets,setAssets] = useState([
@@ -1953,6 +2005,8 @@ export default function App() {
       aiProposal: null,
     }]);
   };
+
+  if (!authed) return <PasswordGate onAuth={()=>setAuthed(true)}/>;
 
   return (
     <>
