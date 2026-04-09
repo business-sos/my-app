@@ -1653,8 +1653,9 @@ async function analyzeFacebookHistory(posts, mind) {
 }
 
 // ─── ANALYTICS PAGE ──────────────────────────────────────────────────────────
-function AnalyticsPage({ mind, setMind, formats }) {
+function AnalyticsPage({ mind, setMind, formats, analyticsImport, setAnalyticsImport }) {
   const [liData,setLiData] = useState(null); const [liErr,setLiErr] = useState(""); const [liAnalysis,setLiAnalysis] = useState(null); const [liALoading,setLiALoading] = useState(false);
+  const [liParsing,setLiParsing] = useState(false); const [liParseErr,setLiParseErr] = useState("");
   const [igToken,setIgToken] = useState(()=>localStorage.getItem("bgb_ig_token")||"");
   const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false); const [igSetup,setIgSetup] = useState(false);
   const [fbPosts,setFbPosts] = useState([]); const [fbErr,setFbErr] = useState(""); const [fbAnalysis,setFbAnalysis] = useState(null); const [fbALoading,setFbALoading] = useState(false);
@@ -1675,6 +1676,25 @@ function AnalyticsPage({ mind, setMind, formats }) {
     setYtLoading(true); setYtErr(""); setYtData(null); setYtAnalysis(null);
     try { setYtData(await pullYouTubeAnalytics(ytKey,ytChannelId)); }
     catch(e){ setYtErr(e.message); } finally { setYtLoading(false); }
+  };
+
+  const parseExtensionData = async () => {
+    if (!analyticsImport?.rawText) return;
+    setLiParsing(true); setLiParseErr(""); setLiData(null); setLiAnalysis(null);
+    try {
+      const raw = await callClaude(
+        `You are a LinkedIn analytics parser. Extract post performance data from raw LinkedIn Creator Analytics page text. Return ONLY valid JSON:
+{"posts":[{"date":"YYYY-MM-DD","hook":"first line of post (max 80 chars)","impressions":0,"clicks":0,"reactions":0,"comments":0,"shares":0,"url":""}],"summary":{"totalPosts":0,"totalImpressions":0,"totalClicks":0,"avgCTR":"0%"}}
+Rules: extract every post you can find, use 0 for any metric you can't find, date format YYYY-MM-DD, hook is the opening line of the post text if visible otherwise leave empty. If you see numbers like "1.2K" convert to 1200.`,
+        `LinkedIn analytics page text:\n\n${analyticsImport.rawText}`,
+        3000
+      );
+      const data = JSON.parse(raw);
+      if (!data.posts?.length) throw new Error("No posts found in the page data. Try scrolling down on the LinkedIn analytics page first, then pull again.");
+      setLiData(data);
+      setAnalyticsImport(null);
+    } catch(e) { setLiParseErr("Parse failed: "+e.message); }
+    finally { setLiParsing(false); }
   };
 
   const runAnalysis = async (data, setAnalysis, setALoading) => {
@@ -1740,11 +1760,24 @@ function AnalyticsPage({ mind, setMind, formats }) {
 
       {/* ── LINKEDIN ── */}
       <div className="card mb16">
-        <div className="ct">🔵 LinkedIn <span className="xs muted" style={{fontWeight:400}}>Creator Analytics CSV</span>
+        <div className="ct">🔵 LinkedIn <span className="xs muted" style={{fontWeight:400}}>Creator Analytics</span>
           {liData&&<span className="tag tb mla">{liData.summary.totalPosts} posts imported</span>}
         </div>
+
+        {/* Extension data arrived */}
+        {analyticsImport?.platform==="LinkedIn"&&!liData&&(
+          <div className="alert av mb12" style={{borderColor:"rgba(201,168,76,0.5)"}}>
+            <div className="f fac g8">
+              <div style={{flex:1}}><strong>Data received from Chrome extension</strong> — {Math.round((analyticsImport.rawText?.length||0)/1000)}K chars captured from LinkedIn analytics page.</div>
+              <button className="btn bp bsm" disabled={liParsing} onClick={parseExtensionData}>{liParsing?<><span className="spin"/> Parsing...</>:"Extract Posts →"}</button>
+            </div>
+          </div>
+        )}
+        {liParseErr&&<div className="alert ar mb12">{liParseErr}</div>}
+
         <div className="alert ag mb12" style={{fontSize:12}}>
-          <strong>How to export:</strong> LinkedIn → Click your profile photo → View Profile → scroll to Analytics → Creator analytics → top right click <strong>Export</strong> → select date range → Download CSV. Upload that file below.
+          <strong>Option A — Chrome Extension (recommended):</strong> Open the BGB extension → Pull LinkedIn → Send to BGB App → click "Extract Posts" above.<br/>
+          <strong>Option B — CSV upload:</strong> LinkedIn → Profile → Analytics → Content tab → Export → upload below.
         </div>
         {liErr&&<div className="alert ar mb12">{liErr}</div>}
         <div className="fg">
@@ -2314,7 +2347,7 @@ export default function App() {
             {page==="queue"&&<ContentQueuePage contentQueue={contentQueue} setContentQueue={setContentQueue} postFromQueue={postFromQueue}/>}
             {page==="engine"&&<GeneratePage mind={mind} formats={formats} bestPractice={bestPractice} assets={assets} addToQueue={addToQueue} setPage={setPage} writingRules={writingRules}/>}
             {page==="tracking"&&<Tracking posts={posts} setPosts={setPosts}/>}
-            {page==="analytics"&&<AnalyticsPage mind={mind} setMind={setMind} formats={formats}/>}
+            {page==="analytics"&&<AnalyticsPage mind={mind} setMind={setMind} formats={formats} analyticsImport={analyticsImport} setAnalyticsImport={setAnalyticsImport}/>}
             {page==="dna"&&<ContentDNAPage mind={mind} setMind={setMind} formats={formats} setFormats={setFormats}/>}
             {page==="review"&&<ReviewQueue posts={posts} setPosts={setPosts} formats={formats} setFormats={setFormats} reviewQueue={reviewQueue} setReviewQueue={setReviewQueue} mind={mind}/>}
             {page==="report"&&<WeeklyReport posts={posts} formats={formats} mind={mind}/>}
