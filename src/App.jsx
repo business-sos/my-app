@@ -1291,7 +1291,18 @@ async function pullYouTubeAnalytics(apiKey, channelId) {
 
 async function analyzeAnalytics(data, mind, formats) {
   const raw = await callClaude(
-    `You are the BGB Content Intelligence agent. Analyse platform analytics for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\nPrimary signals: saves (Instagram), clicks (Facebook), views (YouTube). Return ONLY valid JSON: {"platform":"...","topPosts":[{"id":"...","title":"...","whyItWorked":"...","signal":"high|medium|low"}],"themes":["..."],"hookPatterns":["..."],"bestPostingTime":"...","insights":["..."],"recommendations":[{"text":"...","category":"framework|contrarian|language"}]}`,
+    `You are the BGB Content Intelligence agent. Analyse platform analytics for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}
+
+SIGNAL PRIORITY ORDER (most to least important): Clicks → Engagement (reactions+comments+shares) → Impressions → Hook style → Content structure → CTA
+
+CRITICAL RULES FOR RECOMMENDATIONS:
+1. Sort posts by clicks first to identify true winners
+2. For HIGH-performing posts: identify WHAT WORKED — including any unusual, unconventional, or "incorrect" stylistic choices. Treat these as PATTERN INTERRUPTS that drove curiosity. Recommend replicating them, not fixing them.
+3. For LOW-performing posts: identify what to avoid or change
+4. NEVER recommend removing a stylistic element that appears in a high-click or high-engagement post — the data overrides style theory
+5. Each recommendation must have a type: "replicate" (high performer technique — try again), "avoid" (low performer pattern), or "test" (unproven idea)
+
+Return ONLY valid JSON: {"platform":"...","topPosts":[{"id":"...","title":"...","whyItWorked":"...","signal":"high|medium|low","clicks":0,"impressions":0}],"themes":["..."],"hookPatterns":["..."],"insights":["..."],"recommendations":[{"text":"...","category":"framework|contrarian|language","type":"replicate|avoid|test"}]}`,
     `Analytics data:\n${JSON.stringify(data)}`,
     4000
   );
@@ -1680,18 +1691,34 @@ function AnalyticsPage({ mind, setMind, formats, analyticsImport, setAnalyticsIm
   };
 
   const parseExtensionData = async () => {
-    if (!analyticsImport?.rawText) return;
+    if (!analyticsImport) return;
     setLiParsing(true); setLiParseErr(""); setLiData(null); setLiAnalysis(null);
     try {
+      // Combine all three metric views into one prompt so Claude gets the full picture
+      const sections = [
+        analyticsImport.impressionsRaw && `=== TOP POSTS BY IMPRESSIONS ===\n${analyticsImport.impressionsRaw}`,
+        analyticsImport.clicksRaw && `=== TOP POSTS BY CLICKS ===\n${analyticsImport.clicksRaw}`,
+        analyticsImport.engagementRaw && `=== TOP POSTS BY ENGAGEMENT ===\n${analyticsImport.engagementRaw}`,
+      ].filter(Boolean).join('\n\n') || analyticsImport.rawText || '';
+      if (!sections) throw new Error("No data found in the import.");
       const raw = await callClaude(
-        `You are a LinkedIn analytics parser. Extract post performance data from raw LinkedIn Creator Analytics page text. Return ONLY valid JSON:
-{"posts":[{"date":"YYYY-MM-DD","hook":"first line of post (max 80 chars)","impressions":0,"clicks":0,"reactions":0,"comments":0,"shares":0,"url":""}],"summary":{"totalPosts":0,"totalImpressions":0,"totalClicks":0,"avgCTR":"0%"}}
-Rules: extract every post you can find, use 0 for any metric you can't find, date format YYYY-MM-DD, hook is the opening line of the post text if visible otherwise leave empty. If you see numbers like "1.2K" convert to 1200.`,
-        `LinkedIn analytics page text:\n\n${analyticsImport.rawText}`,
-        3000
+        `You are a LinkedIn analytics parser. You will receive raw text scraped from LinkedIn Creator Analytics — it may contain three sections: impressions view, clicks view, and engagement view. Extract every post you can find and merge the metrics.
+
+Return ONLY valid JSON:
+{"posts":[{"date":"YYYY-MM-DD","hook":"opening line of post (max 80 chars, exact text)","mediaType":"text|image|video|carousel|document","impressions":0,"clicks":0,"reactions":0,"comments":0,"shares":0,"url":""}],"summary":{"totalPosts":0,"totalImpressions":0,"totalClicks":0,"vsLastWeek":"e.g. +12% impressions vs prior 7 days, or unknown"}}
+
+Rules:
+- Priority order when ranking: clicks first, then engagement (reactions+comments+shares), then impressions
+- Extract the hook as the exact opening text of each post — preserve unconventional punctuation or style exactly as written
+- Convert K/M suffixes: 1.2K=1200, 3.5M=3500000
+- Use 0 for any metric not found
+- Deduplicate posts that appear in multiple sections — merge their metrics
+- Include up to 7 posts maximum, ranked by clicks desc`,
+        `LinkedIn analytics data:\n\n${sections}`,
+        3500
       );
       const data = JSON.parse(raw);
-      if (!data.posts?.length) throw new Error("No posts found in the page data. Try scrolling down on the LinkedIn analytics page first, then pull again.");
+      if (!data.posts?.length) throw new Error("No posts found. Try pulling again — make sure the LinkedIn analytics page fully loaded before sending.");
       setLiData(data);
       setAnalyticsImport(null);
     } catch(e) { setLiParseErr("Parse failed: "+e.message); }
@@ -1725,11 +1752,21 @@ Rules: extract every post you can find, use 0 for any metric you can't find, dat
       {analysis.bestPostingTime&&<div className="mb12"><div className="xs muted mb4">Best posting time</div><span className="tag tb">{analysis.bestPostingTime}</span></div>}
       {analysis.recommendations?.length>0&&<div><div className="xs muted mb8">Recommendations — add to Mind Bank</div>{analysis.recommendations.map((r,i)=>{
         const rid=analysis.platform+"-"+i; const done=mindAdded[rid||r.text];
+        const isReplicate=r.type==="replicate"; const isAvoid=r.type==="avoid";
+        const typeTag = isReplicate
+          ? <span className="tag" style={{background:"rgba(74,103,65,0.15)",color:"var(--sage)",fontSize:10}}>✦ replicate</span>
+          : isAvoid
+          ? <span className="tag" style={{background:"rgba(180,80,60,0.12)",color:"var(--rust)",fontSize:10}}>✕ avoid</span>
+          : <span className="tag" style={{background:"rgba(201,168,76,0.12)",color:"var(--gold)",fontSize:10}}>⚗ test</span>;
         return (
-          <div key={i} className="f fac g8 mb8">
-            <div className="sm" style={{flex:1}}>{r.text||r.body||r.insight}</div>
-            <span className="tag ti">{r.category||"framework"}</span>
-            <button className={`btn bsm ${done?"bsa":"bp"}`} onClick={()=>{onAddToMind(r,rid);}}>{done?"✓ Added":"+ Mind"}</button>
+          <div key={i} className="f fac g8 mb8" style={{background:isReplicate?"rgba(74,103,65,0.06)":"",borderRadius:4,padding:"4px 6px"}}>
+            <div style={{flex:1}}>
+              <div className="sm">{r.text||r.body||r.insight}</div>
+              <div className="f g6 mt4">{typeTag}<span className="tag ti" style={{fontSize:10}}>{r.category||"framework"}</span></div>
+            </div>
+            <button className={`btn bsm ${done?"bsa":isReplicate?"bg":"bp"}`} onClick={()=>{onAddToMind(r,rid);}} style={{flexShrink:0}}>
+              {done?"✓ Added":isReplicate?"Try Again →":"+ Mind"}
+            </button>
           </div>
         );
       })}</div>}

@@ -121,113 +121,89 @@ function linkedinScraperFn() {
 
   // ── HELPERS ────────────────────────────────────────────────────────────────
 
-  function parseNum(str) {
-    if (!str) return 0;
-    str = String(str).trim().replace(/,/g, '').replace(/\s/g, '');
-    if (!str || str === '—' || str === '-') return 0;
-    if (/^\d+(\.\d+)?[Kk]$/.test(str)) return Math.round(parseFloat(str) * 1000);
-    if (/^\d+(\.\d+)?[Mm]$/.test(str)) return Math.round(parseFloat(str) * 1000000);
-    const n = parseInt(str);
-    return isNaN(n) ? 0 : n;
-  }
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-  function findMetric(container, labels) {
-    const els = Array.from(container.querySelectorAll('*'));
-    for (const el of els) {
-      const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-      if (labels.some(l => t === l || t === l + ':')) {
-        let sib = el.nextElementSibling;
-        for (let i = 0; i < 4 && sib; i++, sib = sib.nextElementSibling) {
-          const v = (sib.innerText || sib.textContent || '').trim();
-          if (/^[\d,.]+[KkMm]?$/.test(v)) return parseNum(v);
-        }
-        const parent = el.parentElement;
-        if (parent) {
-          for (const child of parent.children) {
-            if (child !== el) {
-              const v = (child.innerText || child.textContent || '').trim();
-              if (/^[\d,.]+[KkMm]?$/.test(v)) return parseNum(v);
-            }
-          }
-        }
-      }
+  // Find a button/tab by text content — resilient to LinkedIn's obfuscated classes
+  function findByText(texts) {
+    const els = Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a'));
+    for (const text of texts) {
+      const found = els.find(el => {
+        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+        return t === text.toLowerCase() || t.startsWith(text.toLowerCase());
+      });
+      if (found) return found;
     }
-    return 0;
+    return null;
   }
 
-  function detectType(el) {
-    if (el.querySelector('video')) return 'video';
-    if (el.querySelector('[class*="video"], [aria-label*="video"]')) return 'video';
-    if (el.querySelector('[class*="carousel"], [class*="multi-image"]')) return 'carousel';
-    if (el.querySelector('[class*="document"], [data-test-id*="document"]')) return 'document';
-    const imgs = Array.from(el.querySelectorAll('img')).filter(img => {
-      const src = img.src || img.getAttribute('data-src') || '';
-      const w = img.offsetWidth || img.naturalWidth || 0;
-      return w > 80 && !src.includes('profile') && !src.includes('ghost') && !src.includes('company-logo');
-    });
-    if (imgs.length > 0) return 'image';
-    return 'text';
+  async function clickAndWait(texts, ms=2500) {
+    const el = findByText(texts);
+    if (el) { el.scrollIntoView({ block:'center' }); el.click(); await sleep(ms); return true; }
+    return false;
   }
 
-  function getHook(text) {
-    if (!text) return '';
-    return text.split('\n').map(l => l.trim()).filter(l => l.length > 5)[0] || '';
+  // Grab visible page text (capped)
+  function pageText(limit=15000) {
+    return (document.body.innerText || '').trim().slice(0, limit);
   }
 
-  function isContentLine(line) {
-    if (line.length < 12) return false;
-    if (/^[\d,.\s]+[KkMm%]?$/.test(line)) return false;
-    if (/^(impressions?|reactions?|comments?|reposts?|clicks?|views?|likes?|shares?|followers?|engagement|rate|reach)$/i.test(line)) return false;
-    return true;
+  // Collect post URLs visible on page
+  function postLinks() {
+    return Array.from(document.querySelectorAll('a[href*="/posts/"],a[href*="/feed/update/"]'))
+      .map(a => a.href).filter((v,i,arr) => arr.indexOf(v)===i).slice(0, 30);
   }
 
-  // ── EXTRACTION ─────────────────────────────────────────────────────────────
-  // Rather than brittle DOM selectors, grab the raw visible text from the page
-  // and let Claude interpret it. Much more resilient to LinkedIn DOM changes.
-
-  function extractData() {
-    // Grab all visible text chunks from the page body
-    const rawText = (document.body.innerText || '').trim();
-
-    // Also try to grab post URLs from the page
-    const postLinks = Array.from(document.querySelectorAll('a[href*="/posts/"], a[href*="/feed/update/"]'))
-      .map(a => a.href)
-      .filter((v, i, arr) => arr.indexOf(v) === i) // unique
-      .slice(0, 20);
-
-    // Try to detect any media thumbnails (rough post type hints)
-    const hasVideo = document.querySelector('video, [class*="video-player"], [aria-label*="video"]') !== null;
-    const imgCount = document.querySelectorAll('img[src*="media"], img[src*="dms"]').length;
-
-    return {
-      platform: 'LinkedIn',
-      scrapedAt: new Date().toISOString(),
-      url: location.href,
-      rawText: rawText.slice(0, 25000), // Claude will parse this
-      postLinks,
-      hints: { hasVideo, imgCount },
-      summary: { totalImpressions: 0, followerChange: 0 },
-      posts: [] // populated by Claude in the app
-    };
+  // Scroll down step by step so LinkedIn's virtual list renders rows
+  async function scrollDown() {
+    const positions = [400, 900, 1600, 2500, 3500,
+      document.body.scrollHeight * 0.5,
+      document.body.scrollHeight * 0.75,
+      document.body.scrollHeight];
+    for (const pos of positions) {
+      window.scrollTo({ top: pos, behavior: 'smooth' });
+      await sleep(800);
+    }
   }
 
-  // ── SCROLL THEN EXTRACT ────────────────────────────────────────────────────
-  // Scroll through the page in steps, pausing at each position so LinkedIn's
-  // virtual DOM has time to render newly visible rows before moving on.
+  // Full capture sequence for one metric view:
+  // scroll → click Show More → wait → capture text
+  async function captureView() {
+    await scrollDown();
+    await clickAndWait(['Show more', 'Show more posts', 'Load more', 'show more'], 2500);
+    await sleep(1000);
+    return pageText(15000);
+  }
+
+  // ── MAIN SEQUENCE ──────────────────────────────────────────────────────────
   return new Promise((resolve) => {
     const step = async () => {
-      const positions = [400, 900, 1600, 2500, 3500,
-        document.body.scrollHeight * 0.4,
-        document.body.scrollHeight * 0.65,
-        document.body.scrollHeight * 0.85,
-        document.body.scrollHeight];
-      for (const pos of positions) {
-        window.scrollTo({ top: pos, behavior: 'smooth' });
-        await new Promise(r => setTimeout(r, 900));
-      }
-      // Final pause for the last batch of rows to finish rendering
-      await new Promise(r => setTimeout(r, 2000));
-      resolve(extractData());
+      // 1. Default view = Impressions — scroll + expand
+      const impressionsRaw = await captureView();
+
+      // 2. Switch to Clicks metric — scroll back up, click tab, re-capture
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      await sleep(1000);
+      await clickAndWait(['Clicks', 'Click'], 2500);
+      const clicksRaw = await captureView();
+
+      // 3. Switch to Engagement metric
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      await sleep(1000);
+      await clickAndWait(['Engagement rate', 'Engagement', 'Reactions', 'Reaction'], 2500);
+      const engagementRaw = await captureView();
+
+      resolve({
+        platform: 'LinkedIn',
+        scrapedAt: new Date().toISOString(),
+        url: location.href,
+        impressionsRaw,
+        clicksRaw,
+        engagementRaw,
+        rawText: impressionsRaw, // backward compat
+        postLinks: postLinks(),
+        summary: { totalImpressions: 0, followerChange: 0 },
+        posts: []
+      });
     };
     step();
   });
