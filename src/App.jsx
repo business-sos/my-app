@@ -183,6 +183,7 @@ const SEED_MIND = {
     { id:2, title:"Things Stephen never says", body:"Never: 'leverage synergies', 'scale your brand', 'optimize workflow', 'crush it', 'hustle'. Direct and unimpressed by jargon.", tags:["voice","negative"] },
     { id:3, title:"Sentence structure patterns", body:"Short sentences. One idea per line on LinkedIn. Uses numbers specifically ($3.2M not 'a few million'). Ends with a 1-2 line punch. Never bullet lists in content — prose only.", tags:["format","voice"] },
   ],
+  contentBank: [],
 };
 
 const SEED_WRITING_RULES = `NEVER DO THIS:
@@ -239,11 +240,13 @@ async function callClaude(sys, user, maxTokens=2000) {
 }
 
 function voiceCtx(mind, rules) {
-  return `STEPHEN'S VOICE:
+  const cb = mind.contentBank?.filter(f=>f.summary);
+  return `STEPHEN'S VOICE — SOURCE MATERIAL:
+Use the frameworks, stories, language and content below as raw material. Draw on the concepts, proof points, and angles — apply your own intelligence to how they are expressed. Never copy these verbatim into posts.
 Frameworks: ${mind.frameworks.map(f=>f.title+": "+f.body).join(" | ")}
 Client stories: ${mind.clientStories.map(s=>s.title+": "+s.body).join(" | ")}
 Contrarian takes: ${mind.contrarian.map(c=>c.title+": "+c.body).join(" | ")}
-Language: ${mind.language.map(l=>l.body).join(" | ")}
+Language: ${mind.language.map(l=>l.body).join(" | ")}${cb?.length?`\nContent Bank: ${cb.map(f=>f.title+": "+f.summary+(f.keyIdeas?.length?" Key ideas: "+f.keyIdeas.join(", "):"")).join(" | ")}`:""}
 ${rules?`\nWRITING RULES — MUST FOLLOW:\n${rules}`:"NEVER: corporate jargon, bullet lists. Short sentences. Specific numbers. Direct."}`;
 }
 
@@ -433,52 +436,163 @@ function Dashboard({ posts, formats, reviewQueue, contentQueue, setPage, postFro
   );
 }
 
+async function extractPDF(file) {
+  const pdfjsLib = window.pdfjsLib;
+  if (!pdfjsLib) throw new Error("PDF.js not loaded — please refresh and try again.");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: buffer}).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(item => item.str).join(" ") + "\n";
+  }
+  return text;
+}
+
+async function extractDOCX(file) {
+  const mammoth = window.mammoth;
+  if (!mammoth) throw new Error("Mammoth.js not loaded — please refresh and try again.");
+  const buffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({arrayBuffer: buffer});
+  return result.value;
+}
+
 function MyMind({ mind, setMind }) {
   const [tab,setTab] = useState("frameworks");
   const [form,setForm] = useState({title:"",body:"",tags:""});
   const [saved,setSaved] = useState(false);
+  const [uploading,setUploading] = useState(false);
+  const [uploadStage,setUploadStage] = useState("");
+  const [uploadErr,setUploadErr] = useState("");
+
   const cats = [
     {key:"frameworks",label:"Frameworks",icon:"🧠",col:"var(--gold)"},
     {key:"clientStories",label:"Client Stories",icon:"🤝",col:"var(--sage)"},
     {key:"contrarian",label:"Contrarian Takes",icon:"⚡",col:"var(--rust)"},
     {key:"language",label:"Language Patterns",icon:"✍️",col:"var(--violet)"},
   ];
+
   const add = () => {
     if(!form.title||!form.body) return;
     setMind(m=>({...m,[tab]:[...m[tab],{id:Date.now(),title:form.title,body:form.body,tags:form.tags.split(",").map(t=>t.trim()).filter(Boolean)}]}));
     setForm({title:"",body:"",tags:""}); setSaved(true); setTimeout(()=>setSaved(false),1800);
   };
   const del = (key,id) => setMind(m=>({...m,[key]:m[key].filter(e=>e.id!==id)}));
+  const delContent = (id) => setMind(m=>({...m,contentBank:(m.contentBank||[]).filter(f=>f.id!==id)}));
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true); setUploadErr(""); setUploadStage("Extracting text from file...");
+    try {
+      let text = "";
+      if (file.name.toLowerCase().endsWith(".pdf")) {
+        text = await extractPDF(file);
+      } else if (file.name.toLowerCase().endsWith(".docx")) {
+        text = await extractDOCX(file);
+      } else {
+        throw new Error("Only PDF and DOCX files are supported.");
+      }
+      if (!text.trim()) throw new Error("No text could be extracted from this file.");
+      const truncated = text.slice(0, 40000);
+      setUploadStage("Claude is reading and extracting key ideas...");
+      const raw = await callClaude(
+        `You are a content strategist. Extract the core ideas, frameworks, and language from this business document for use in LinkedIn content creation. Return ONLY valid JSON: {"title":"short descriptive title (max 8 words)","summary":"2-3 sentence overview of the document core value","keyIdeas":["concise idea 1","concise idea 2","up to 8 ideas max"],"frameworks":["framework name and one-line description"],"language":["key phrase or term the business uses"]}`,
+        `Document content:\n\n${truncated}`,
+        1500
+      );
+      const data = JSON.parse(raw);
+      const entry = {
+        id: Date.now(),
+        filename: file.name,
+        title: data.title || file.name,
+        summary: data.summary || "",
+        keyIdeas: data.keyIdeas || [],
+        frameworks: data.frameworks || [],
+        language: data.language || [],
+        uploadedAt: new Date().toISOString(),
+      };
+      setMind(m=>({...m, contentBank: [...(m.contentBank||[]), entry]}));
+    } catch(err) {
+      setUploadErr("Upload failed: " + err.message);
+    } finally {
+      setUploading(false); setUploadStage("");
+      e.target.value = "";
+    }
+  };
+
+  const isContentBank = tab === "contentBank";
   const ac = cats.find(c=>c.key===tab);
+
   return (
     <div>
-      <div className="alert av mb20"><strong>Your Mind Bank</strong> — everything here is injected into every AI generation call. Posts will always sound like you, reference your frameworks, and use real client outcomes.</div>
+      <div className="alert av mb20"><strong>Your Mind Bank</strong> — everything here is injected into every AI generation call as source material. Claude draws on the ideas and frameworks intelligently — it never copies them word for word.</div>
       <div className="g2">
         <div>
-          <div className="tabs">{cats.map(c=><div key={c.key} className={`tab ${tab===c.key?"active":""}`} onClick={()=>setTab(c.key)}>{c.icon} {c.label}</div>)}</div>
-          <div className="card">
-            <div className="ct"><span>{ac.icon}</span> Add to {ac.label}</div>
-            <div className="fg"><label className="lbl">Title</label><input className="inp" placeholder="Name this entry..." value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/></div>
-            <div className="fg"><label className="lbl">Content</label><textarea className="ta" style={{minHeight:130}} placeholder="The AI will use this verbatim in generation calls..." value={form.body} onChange={e=>setForm(f=>({...f,body:e.target.value}))}/></div>
-            <div className="fg"><label className="lbl">Tags</label><input className="inp" placeholder="core, hiring, mindset..." value={form.tags} onChange={e=>setForm(f=>({...f,tags:e.target.value}))}/></div>
-            <button className={`btn w100 ${saved?"bsa":"bp"}`} onClick={add}>{saved?"✓ Added to Your Mind":`Add to ${ac.label} →`}</button>
+          <div className="tabs">
+            {cats.map(c=><div key={c.key} className={`tab ${tab===c.key?"active":""}`} onClick={()=>setTab(c.key)}>{c.icon} {c.label}</div>)}
+            <div className={`tab ${isContentBank?"active":""}`} onClick={()=>setTab("contentBank")}>📁 Content Bank</div>
           </div>
-        </div>
-        <div className="card" style={{maxHeight:680,overflowY:"auto"}}>
-          {cats.map(cat=>(
-            <div key={cat.key} className="mc">
-              <div className="mct" style={{color:cat.col}}>{cat.icon} {cat.label}</div>
-              {mind[cat.key].length===0&&<div className="muted sm">None yet.</div>}
-              {mind[cat.key].map(e=>(
-                <div key={e.id} className="me">
-                  <div className="f fac g8 mb4"><div className="met">{e.title}</div><button className="btn bgh bsm mla" style={{color:"var(--rust)",fontSize:10}} onClick={()=>del(cat.key,e.id)}>Remove</button></div>
-                  <div className="meb">{e.body}</div>
-                  {e.tags?.length>0&&<div className="f g4x fw mt8">{e.tags.map(t=><span key={t} className="tag ti">{t}</span>)}</div>}
-                </div>
-              ))}
+
+          {isContentBank ? (
+            <div className="card">
+              <div className="ct">📁 Upload to Content Bank</div>
+              <div className="xs muted mb14">Upload ebooks, frameworks, or process docs. Claude reads the document once, extracts the key ideas, and injects them into every generation call.</div>
+              <label style={{display:"block",border:"2px dashed var(--border)",borderRadius:2,padding:"28px 16px",textAlign:"center",cursor:uploading?"not-allowed":"pointer",background:"var(--paper)",opacity:uploading?0.6:1}}>
+                <div style={{fontSize:28,marginBottom:6}}>⬆</div>
+                <div style={{fontSize:13,fontWeight:500}}>Click to upload PDF or Word doc</div>
+                <div className="xs muted mt4">PDF or DOCX — text extracted in-browser, ideas summarised by Claude</div>
+                <input type="file" accept=".pdf,.docx" style={{display:"none"}} disabled={uploading} onChange={handleFileUpload}/>
+              </label>
+              {uploading&&<div className="alert av mt12"><span className="spin"/> {uploadStage}</div>}
+              {uploadErr&&<div className="alert ar mt10">{uploadErr}</div>}
             </div>
-          ))}
+          ) : (
+            <div className="card">
+              <div className="ct"><span>{ac.icon}</span> Add to {ac.label}</div>
+              <div className="fg"><label className="lbl">Title</label><input className="inp" placeholder="Name this entry..." value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/></div>
+              <div className="fg"><label className="lbl">Content</label><textarea className="ta" style={{minHeight:130}} placeholder="Describe the idea, framework, or story. Claude will draw on the concept intelligently — not copy the words." value={form.body} onChange={e=>setForm(f=>({...f,body:e.target.value}))}/></div>
+              <div className="fg"><label className="lbl">Tags</label><input className="inp" placeholder="core, hiring, mindset..." value={form.tags} onChange={e=>setForm(f=>({...f,tags:e.target.value}))}/></div>
+              <button className={`btn w100 ${saved?"bsa":"bp"}`} onClick={add}>{saved?"✓ Added to Your Mind":`Add to ${ac.label} →`}</button>
+            </div>
+          )}
         </div>
+
+        {isContentBank ? (
+          <div className="card" style={{maxHeight:680,overflowY:"auto"}}>
+            <div className="mct" style={{color:"var(--ink)"}}>📁 Content Bank</div>
+            {(mind.contentBank||[]).length===0&&<div className="muted sm">No files uploaded yet. Upload a PDF or DOCX and Claude will extract the key ideas automatically.</div>}
+            {(mind.contentBank||[]).map(f=>(
+              <div key={f.id} className="me">
+                <div className="f fac g8 mb4">
+                  <div className="met">{f.title}</div>
+                  <button className="btn bgh bsm mla" style={{color:"var(--rust)",fontSize:10}} onClick={()=>delContent(f.id)}>Remove</button>
+                </div>
+                <div className="xs muted mb6" style={{fontFamily:"DM Mono,monospace",fontSize:10}}>{f.filename}</div>
+                <div className="meb mb8">{f.summary}</div>
+                {f.keyIdeas?.length>0&&<div className="f g4x fw">{f.keyIdeas.slice(0,6).map(k=><span key={k} className="tag ti">{k}</span>)}</div>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="card" style={{maxHeight:680,overflowY:"auto"}}>
+            {cats.map(cat=>(
+              <div key={cat.key} className="mc">
+                <div className="mct" style={{color:cat.col}}>{cat.icon} {cat.label}</div>
+                {mind[cat.key].length===0&&<div className="muted sm">None yet.</div>}
+                {mind[cat.key].map(e=>(
+                  <div key={e.id} className="me">
+                    <div className="f fac g8 mb4"><div className="met">{e.title}</div><button className="btn bgh bsm mla" style={{color:"var(--rust)",fontSize:10}} onClick={()=>del(cat.key,e.id)}>Remove</button></div>
+                    <div className="meb">{e.body}</div>
+                    {e.tags?.length>0&&<div className="f g4x fw mt8">{e.tags.map(t=><span key={t} className="tag ti">{t}</span>)}</div>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
