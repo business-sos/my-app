@@ -972,10 +972,17 @@ function Tracking({ posts, setPosts }) {
     setSyncLoading(true); setSyncMsg("");
     try {
       const ids = published.map(p=>p.id).join(",");
-      const res = await fetch(`/api/counts?ids=${ids}`);
+      const url = ids ? `/api/counts?ids=${ids}&global=1` : `/api/counts?global=1`;
+      const res = await fetch(url);
       const counts = await res.json();
-      setPosts(prev=>prev.map(p=>counts[p.id]!==undefined?{...p,docViews:counts[p.id]}:p));
-      setSyncMsg(`↻ Synced ${Object.keys(counts).length} posts`);
+      const globalTotal = counts["_offer"] ?? null;
+      delete counts["_offer"];
+      if (Object.keys(counts).length > 0) {
+        setPosts(prev=>prev.map(p=>counts[p.id]!==undefined?{...p,docViews:counts[p.id]}:p));
+      }
+      const postMsg = Object.keys(counts).length > 0 ? `${Object.keys(counts).length} post${Object.keys(counts).length!==1?"s":""} synced` : "";
+      const globalMsg = globalTotal !== null ? `${globalTotal} total offer doc views` : "";
+      setSyncMsg("↻ " + [postMsg, globalMsg].filter(Boolean).join(" · ") || "Synced");
     } catch(e) {
       setSyncMsg("Sync failed — check Upstash env vars are set in Vercel");
     } finally { setSyncLoading(false); }
@@ -1016,7 +1023,7 @@ function Tracking({ posts, setPosts }) {
       <div className="card mb16">
         <div className="ct">🔗 Doc View Tracking
           <div className="cta">
-            <button className="btn bp bsm" disabled={syncLoading||published.length===0} onClick={syncDocViews}>
+            <button className="btn bp bsm" disabled={syncLoading} onClick={syncDocViews}>
               {syncLoading?"Syncing…":"↻ Sync Doc Views"}
             </button>
             {syncMsg&&<span className="xs" style={{color:"var(--sage)",fontFamily:"DM Mono,monospace",marginLeft:8}}>{syncMsg}</span>}
