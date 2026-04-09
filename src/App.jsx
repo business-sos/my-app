@@ -144,19 +144,14 @@ const STYLE = `
 `;
 
 // ─── SEED DATA ───────────────────────────────────────────────────────────────
-const SEED_POSTS = [
-  { id:1, title:"The trap most $2M business owners don't see", date:"2025-06-03", platform:"LinkedIn", status:"published", content:"Your business grew because you were good at the work.\n\nNow you're trapped in the work because you're too good at it.\n\nI call it the Founder Trap.\n\nYou built the thing. You ARE the thing.\n\nAnd until you install someone to run it day-to-day, you will always be the bottleneck.\n\nThe fix isn't working harder. It's not another system.\n\nIt's a GM.\n\nSomeone who runs the business so you can build it.\n\nThat's the move.", theme:"Delegation Ladder", format:"Problem → Insight → CTA", impressions:4200, engagement:187, docViews:23, calls:2, trackedLink:"bgb.co/p1", url:"https://linkedin.com/post/1", isTest:false, testGroup:null, proven:false, daysLive:23 },
-  { id:2, title:"Why hiring a GM feels wrong (and why that's the point)", date:"2025-05-28", platform:"LinkedIn", status:"published", content:"Every founder I work with says the same thing before they install a GM:\n\n'I'm worried they won't do it the way I do.'\n\nYou're right. They won't.\n\nThey'll do some things worse. A few things better. And the business will survive.\n\nBecause here's what nobody tells you: the business doesn't need you everywhere.\n\nIt needs you to be intentional.\n\nA GM creates space for that.\n\nThe discomfort is the point. Lean into it.", theme:"GM Install", format:"Contrarian Take", impressions:2800, engagement:94, docViews:31, calls:3, trackedLink:"bgb.co/p2", url:"https://linkedin.com/post/2", isTest:false, testGroup:null, proven:true, daysLive:29 },
-  { id:3, title:"The $500K mistake hidden in your org chart", date:"2025-05-21", platform:"Instagram", status:"published", content:"Most owners have no idea what their time is actually worth.\n\nSo they protect the wrong things.\n\nThey guard tasks worth $50/hour and wonder why they can't grow.\n\nDraw your org chart.\n\nNow put your name everywhere it appears.\n\nThat's the problem.\n\nEvery box with your name is a hire or a delegate.\n\nDo the maths.", theme:"Owner Freedom", format:"Framework Drop", impressions:1900, engagement:211, docViews:8, calls:0, trackedLink:"bgb.co/p3", url:"https://instagram.com/p/xyz", isTest:true, testGroup:"A", proven:false, daysLive:36 },
-  { id:4, title:"What 18 months watching founders taught me", date:"2025-06-10", platform:"LinkedIn", status:"published", content:"The ones who scale share one trait.\n\nIt's not drive. Not strategy. Not capital.\n\nIt's the willingness to stop being the best person in the room.\n\nEvery founder who hit $5M+ in my world did one thing:\n\nThey hired someone better than them at running the day-to-day.\n\nThen they went back to doing what only they can do.\n\nThat's the move.", theme:"Delegation Ladder", format:"Observation + Principle", impressions:3100, engagement:142, docViews:19, calls:1, trackedLink:"bgb.co/p4", url:"https://linkedin.com/post/4", isTest:true, testGroup:"B", proven:false, daysLive:16 },
-];
+const SEED_POSTS = [];
 
 const SEED_FORMATS = [
-  { id:1, name:"Contrarian Take", description:"Open with the conventional wisdom, flip it, end with the earned conclusion.", example:"Everyone says X. Here's why that's wrong...", status:"proven", avgDocViews:28, avgCalls:2.5, postsUsed:4, notes:"Works best when Stephen has a strong personal opinion. LinkedIn." },
-  { id:2, name:"Problem → Insight → CTA", description:"Name the pain precisely, reveal the non-obvious cause, point to the offer doc.", example:"You're working 60hr weeks. Not because you're inefficient...", status:"proven", avgDocViews:21, avgCalls:1.8, postsUsed:6, notes:"Solid workhorse. Converts consistently across themes." },
-  { id:3, name:"Framework Drop", description:"Present a named mental model. Make it feel proprietary.", example:"The Delegation Ladder has 5 rungs. Most owners are stuck on rung 2...", status:"testing", avgDocViews:9, avgCalls:0.4, postsUsed:2, notes:"Testing on Instagram. High engagement, low conversion so far." },
-  { id:4, name:"Observation + Principle", description:"Field observation → universal principle.", example:"After 18 months watching $2M–$5M owners...", status:"testing", avgDocViews:17, avgCalls:0.9, postsUsed:2, notes:"Promising. Second test running." },
-  { id:5, name:"Client Story Arc", description:"Before state → intervention → result. Specific numbers required.", example:"Sarah ran a $3.2M design firm. She was working Sundays...", status:"proposed", avgDocViews:0, avgCalls:0, postsUsed:0, notes:"AI proposed. High conversion in similar niches. Not yet tested." },
+  { id:1, name:"Contrarian Take", description:"Open with the conventional wisdom, flip it, end with the earned conclusion.", example:"Everyone says X. Here's why that's wrong...", status:"proven", avgDocViews:0, avgCalls:0, postsUsed:0, notes:"Works best when Stephen has a strong personal opinion. LinkedIn." },
+  { id:2, name:"Problem → Insight → CTA", description:"Name the pain precisely, reveal the non-obvious cause, point to the offer doc.", example:"You're working 60hr weeks. Not because you're inefficient...", status:"proven", avgDocViews:0, avgCalls:0, postsUsed:0, notes:"Solid workhorse. Converts consistently across themes." },
+  { id:3, name:"Framework Drop", description:"Present a named mental model. Make it feel proprietary.", example:"The Delegation Ladder has 5 rungs. Most owners are stuck on rung 2...", status:"testing", avgDocViews:0, avgCalls:0, postsUsed:0, notes:"Testing on Instagram. High engagement, low conversion so far." },
+  { id:4, name:"Observation + Principle", description:"Field observation → universal principle.", example:"After 18 months watching $2M–$5M owners...", status:"testing", avgDocViews:0, avgCalls:0, postsUsed:0, notes:"Promising. Second test running." },
+  { id:5, name:"Client Story Arc", description:"Before state → intervention → result. Specific numbers required.", example:"Before: $3.2M, working Sundays. Intervention: GM install. After: owner working 3 days...", status:"proposed", avgDocViews:0, avgCalls:0, postsUsed:0, notes:"AI proposed. High conversion in similar niches. Not yet tested." },
 ];
 
 const SEED_MIND = {
@@ -206,10 +201,7 @@ ALWAYS DO THIS:
 - Reference real outcomes from real clients where possible
 - Make the first line do all the work — it determines whether anyone reads on`;
 
-const SEED_REVIEW = [
-  { id:1, postId:3, postTitle:"The $500K mistake hidden in your org chart", dueDate:"2025-06-27", status:"ready", platform:"Instagram", docViews:8, calls:0, impressions:1900, format:"Framework Drop", theme:"Owner Freedom", testGroup:"A", aiProposal:null },
-  { id:2, postId:4, postTitle:"What 18 months watching founders taught me", dueDate:"2025-06-26", status:"ready", platform:"LinkedIn", docViews:19, calls:1, impressions:3100, format:"Observation + Principle", theme:"Delegation Ladder", testGroup:"B", aiProposal:null },
-];
+const SEED_REVIEW = [];
 
 const SEED_BESTPRACTICE = [
   { id:1, platform:"LinkedIn", category:"hook", title:"The Specific Failure Hook", pattern:"Open with a named, concrete failure the reader has already lived. No setup. No 'most people'. Just the exact moment they recognise.", example:"Your business grew because you were good at the work.\n\nNow you're trapped in the work because you're too good at it.", whyItWorks:"Specific failure creates instant recognition. The reader feels seen before you've sold anything. Stops the scroll because it sounds like their internal monologue.", source:"manual", addedDate:"2025-06-01" },
@@ -2099,13 +2091,24 @@ export default function App() {
     return localStorage.getItem(AUTH_KEY) === "1";
   });
   const [page,setPage] = useState("dashboard");
-  const [posts,setPosts] = useState(SEED_POSTS);
+
+  // ── Persisted state — survives page refresh ──────────────────────────────
+  const lsGet = (key, fallback) => { try { const s=localStorage.getItem(key); return s?JSON.parse(s):fallback; } catch{ return fallback; } };
+  const [posts,setPosts] = useState(()=>lsGet("bgb_posts",[]));
+  const [mind,setMind] = useState(()=>lsGet("bgb_mind",SEED_MIND));
+  const [writingRules,setWritingRules] = useState(()=>lsGet("bgb_rules",SEED_WRITING_RULES));
+  const [formats,setFormats] = useState(()=>lsGet("bgb_formats",SEED_FORMATS));
+  const [reviewQueue,setReviewQueue] = useState(()=>lsGet("bgb_review",[]));
+  const [bestPractice,setBestPractice] = useState(()=>lsGet("bgb_bestpractice",SEED_BESTPRACTICE));
+  useEffect(()=>{ localStorage.setItem("bgb_posts",JSON.stringify(posts)); },[posts]);
+  useEffect(()=>{ localStorage.setItem("bgb_mind",JSON.stringify(mind)); },[mind]);
+  useEffect(()=>{ localStorage.setItem("bgb_rules",JSON.stringify(writingRules)); },[writingRules]);
+  useEffect(()=>{ localStorage.setItem("bgb_formats",JSON.stringify(formats)); },[formats]);
+  useEffect(()=>{ localStorage.setItem("bgb_review",JSON.stringify(reviewQueue)); },[reviewQueue]);
+  useEffect(()=>{ localStorage.setItem("bgb_bestpractice",JSON.stringify(bestPractice)); },[bestPractice]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const [assets,setAssets] = useState([]);
-  const [mind,setMind] = useState(SEED_MIND);
-  const [writingRules,setWritingRules] = useState(SEED_WRITING_RULES);
-  const [formats,setFormats] = useState(SEED_FORMATS);
-  const [reviewQueue,setReviewQueue] = useState(SEED_REVIEW);
-  const [bestPractice,setBestPractice] = useState(SEED_BESTPRACTICE);
   const [analyticsImport,setAnalyticsImport] = useState(null);
   const [instagramImport,setInstagramImport] = useState(null);
   const [contentQueue,setContentQueue] = useState([]);
