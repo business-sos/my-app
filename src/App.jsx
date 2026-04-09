@@ -1312,6 +1312,37 @@ function parseLinkedInCSV(text) {
   }).filter(Boolean).sort((a,b)=>b.date.localeCompare(a.date));
 }
 
+function parseLinkedInAnalytics(csvText) {
+  const lines = csvText.trim().split("\n");
+  if (lines.length < 2) throw new Error("CSV appears empty — make sure you exported the Analytics CSV, not the post history CSV.");
+  const header = lines[0].split(",").map(h=>h.trim().replace(/"/g,"").toLowerCase());
+  const idx = name => header.findIndex(h=>h.includes(name));
+  const dateIdx=idx("date"), linkIdx=idx("link"), typeIdx=idx("type"),
+    impIdx=idx("impression"), clickIdx=idx("click"), ctrIdx=idx("ctr"),
+    likeIdx=idx("like"), commentIdx=idx("comment"), shareIdx=idx("share");
+  if (impIdx===-1) throw new Error("Couldn't find Impressions column — make sure this is the LinkedIn Creator Analytics export, not the post history export.");
+  const posts = lines.slice(1).map((line,i)=>{
+    const cols = line.split(",").map(c=>c.trim().replace(/"/g,""));
+    return {
+      id: i,
+      date: cols[dateIdx]||"",
+      url: cols[linkIdx]||"",
+      type: cols[typeIdx]||"",
+      impressions: Number(cols[impIdx]||0),
+      clicks: Number(cols[clickIdx]||0),
+      ctr: cols[ctrIdx]||"0%",
+      likes: Number(cols[likeIdx]||0),
+      comments: Number(cols[commentIdx]||0),
+      shares: Number(cols[shareIdx]||0),
+    };
+  }).filter(p=>p.impressions>0||p.clicks>0);
+  const totalImp = posts.reduce((s,p)=>s+p.impressions,0);
+  const totalClicks = posts.reduce((s,p)=>s+p.clicks,0);
+  const ctrNums = posts.map(p=>parseFloat(p.ctr)).filter(n=>!isNaN(n));
+  const avgCTR = ctrNums.length ? (ctrNums.reduce((s,n)=>s+n,0)/ctrNums.length).toFixed(2)+"%" : "0%";
+  return { posts, summary:{ totalPosts:posts.length, totalImpressions:totalImp, totalClicks, avgCTR } };
+}
+
 // ─── CONTENT DNA ─────────────────────────────────────────────────────────────
 // Sanitise post text before sending to Claude — strips chars that break JSON
 function sanitiseForPrompt(str, maxLen=350) {
@@ -1623,12 +1654,13 @@ async function analyzeFacebookHistory(posts, mind) {
 
 // ─── ANALYTICS PAGE ──────────────────────────────────────────────────────────
 function AnalyticsPage({ mind, setMind, formats }) {
+  const [liData,setLiData] = useState(null); const [liErr,setLiErr] = useState(""); const [liAnalysis,setLiAnalysis] = useState(null); const [liALoading,setLiALoading] = useState(false);
   const [igToken,setIgToken] = useState(()=>localStorage.getItem("bgb_ig_token")||"");
-  const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false);
+  const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false); const [igSetup,setIgSetup] = useState(false);
   const [fbPosts,setFbPosts] = useState([]); const [fbErr,setFbErr] = useState(""); const [fbAnalysis,setFbAnalysis] = useState(null); const [fbALoading,setFbALoading] = useState(false);
   const [ytKey,setYtKey] = useState(()=>localStorage.getItem("bgb_yt_key")||"");
   const [ytChannelId,setYtChannelId] = useState(()=>localStorage.getItem("bgb_yt_channel_id")||"");
-  const [ytData,setYtData] = useState(null); const [ytLoading,setYtLoading] = useState(false); const [ytErr,setYtErr] = useState(""); const [ytAnalysis,setYtAnalysis] = useState(null); const [ytALoading,setYtALoading] = useState(false);
+  const [ytData,setYtData] = useState(null); const [ytLoading,setYtLoading] = useState(false); const [ytErr,setYtErr] = useState(""); const [ytAnalysis,setYtAnalysis] = useState(null); const [ytALoading,setYtALoading] = useState(false); const [ytSetup,setYtSetup] = useState(false);
 
   const pullIG = async () => {
     if(!igToken.trim()) return;
@@ -1706,11 +1738,71 @@ function AnalyticsPage({ mind, setMind, formats }) {
     <div>
       <div className="alert av mb20"><strong>Analytics Import</strong> — pull post data from each platform. The agent analyses what's working and surfaces insights you can add directly to Your Mind Bank.</div>
 
+      {/* ── LINKEDIN ── */}
+      <div className="card mb16">
+        <div className="ct">🔵 LinkedIn <span className="xs muted" style={{fontWeight:400}}>Creator Analytics CSV</span>
+          {liData&&<span className="tag tb mla">{liData.summary.totalPosts} posts imported</span>}
+        </div>
+        <div className="alert ag mb12" style={{fontSize:12}}>
+          <strong>How to export:</strong> LinkedIn → Click your profile photo → View Profile → scroll to Analytics → Creator analytics → top right click <strong>Export</strong> → select date range → Download CSV. Upload that file below.
+        </div>
+        {liErr&&<div className="alert ar mb12">{liErr}</div>}
+        <div className="fg">
+          <label className="lbl">Upload LinkedIn Analytics CSV</label>
+          <input type="file" accept=".csv" style={{padding:"8px 0",fontSize:13,color:"var(--ink)"}} onChange={e=>{
+            const file=e.target.files[0]; if(!file) return;
+            setLiErr(""); setLiData(null); setLiAnalysis(null);
+            const reader=new FileReader();
+            reader.onload=ev=>{
+              try { const data=parseLinkedInAnalytics(ev.target.result); if(!data.posts.length) throw new Error("No posts found in CSV."); setLiData(data); }
+              catch(err){ setLiErr("Parse failed: "+err.message); }
+            };
+            reader.readAsText(file);
+          }}/>
+        </div>
+        {liData&&<>
+          <div className="g4 mb16">
+            <div className="sc gold"><div className="sl">Posts</div><div className="sv">{liData.summary.totalPosts}</div></div>
+            <div className="sc sage"><div className="sl">Total Impressions</div><div className="sv">{liData.summary.totalImpressions.toLocaleString()}</div></div>
+            <div className="sc rust"><div className="sl">Total Clicks</div><div className="sv">{liData.summary.totalClicks.toLocaleString()}</div></div>
+            <div className="sc violet"><div className="sl">Avg CTR</div><div className="sv">{liData.summary.avgCTR}</div></div>
+          </div>
+          <div className="ct" style={{fontSize:13}}>Top 10 by Impressions</div>
+          {[...liData.posts].sort((a,b)=>b.impressions-a.impressions).slice(0,10).map((p,i)=>(
+            <div key={p.id} className="li">
+              <div className="lidate xs muted">{p.date.slice(0,10)}</div>
+              <div className="libody">
+                <div className="limetrics mt4">
+                  <span className="mp hl"><strong>{p.impressions.toLocaleString()}</strong> imp</span>
+                  <span className="mp"><strong>{p.clicks}</strong> clicks</span>
+                  <span className="mp"><strong>{p.ctr}</strong> CTR</span>
+                  <span className="mp"><strong>{p.likes}</strong> likes</span>
+                  {p.url&&<a href={p.url} target="_blank" rel="noreferrer" className="xs muted">↗</a>}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div className="mt12">
+            <button className="btn bp" onClick={()=>runAnalysis({platform:"LinkedIn",...liData},setLiAnalysis,setLiALoading)} disabled={liALoading}>{liALoading?<><span className="spin"/> Analysing...</>:"Run Analysis →"}</button>
+          </div>
+          <AnalysisPanel analysis={liAnalysis} onAddToMind={addToMind}/>
+        </>}
+      </div>
+
       {/* ── INSTAGRAM ── */}
       <div className="card mb16">
         <div className="ct">📸 Instagram <span className="xs muted" style={{fontWeight:400}}>Graph API</span>
           {igData&&<span className="tag ts mla">Connected — @{igData.username}</span>}
         </div>
+        <button className="btn bgh bsm mb10" onClick={()=>setIgSetup(s=>!s)} style={{fontSize:11}}>{igSetup?"▲ Hide setup":"▼ How to get your access token"}</button>
+        {igSetup&&<div className="alert ag mb12" style={{fontSize:12}}>
+          <strong>Setup steps:</strong><br/>
+          1. Go to <strong>developers.facebook.com</strong> → My Apps → Create App → choose Consumer<br/>
+          2. Add the <strong>Instagram Basic Display</strong> product<br/>
+          3. Under Test Users, connect your Instagram account<br/>
+          4. Open <strong>Graph API Explorer</strong> → select your app → generate a User Token with <code>instagram_basic</code> + <code>instagram_manage_insights</code> scopes<br/>
+          5. Click "Get Long-Lived Token" → paste it below
+        </div>}
         <div className="f fac g8 mb12">
           <input type="password" className="inp" style={{flex:1}} placeholder="Access token (paste from Graph API Explorer)" value={igToken} onChange={e=>setIgToken(e.target.value)}/>
           <button className="btn bp" onClick={pullIG} disabled={igLoading||!igToken.trim()}>{igLoading?<><span className="spin"/> Pulling...</>:"Pull Instagram →"}</button>
@@ -1795,12 +1887,19 @@ function AnalyticsPage({ mind, setMind, formats }) {
         <div className="ct">▶️ YouTube <span className="xs muted" style={{fontWeight:400}}>Data API v3</span>
           {ytData&&<span className="tag tr mla">Connected — {ytData.summary.totalVideos} videos</span>}
         </div>
+        <button className="btn bgh bsm mb10" onClick={()=>setYtSetup(s=>!s)} style={{fontSize:11}}>{ytSetup?"▲ Hide setup":"▼ How to get your API key"}</button>
+        {ytSetup&&<div className="alert ag mb12" style={{fontSize:12}}>
+          <strong>Setup steps:</strong><br/>
+          1. Go to <strong>console.cloud.google.com</strong> → New Project → name it anything<br/>
+          2. APIs & Services → Enable APIs → search <strong>YouTube Data API v3</strong> → Enable<br/>
+          3. APIs & Services → Credentials → Create Credentials → <strong>API Key</strong> → copy it<br/>
+          4. Your Channel ID: go to <strong>YouTube Studio</strong> → Settings → Channel → Advanced settings → copy the Channel ID (starts with UC…)
+        </div>}
         <div className="f fac g8 mb8">
           <input type="password" className="inp" style={{flex:2}} placeholder="API Key (from Google Cloud Console)" value={ytKey} onChange={e=>setYtKey(e.target.value)}/>
           <input className="inp" style={{flex:1}} placeholder="Channel ID (UCxxxx...)" value={ytChannelId} onChange={e=>setYtChannelId(e.target.value)}/>
           <button className="btn bp" onClick={pullYT} disabled={ytLoading||!ytKey.trim()||!ytChannelId.trim()}>{ytLoading?<><span className="spin"/> Pulling...</>:"Pull YouTube →"}</button>
         </div>
-        <div className="xs muted mb12">Channel ID: youtube.com/channel/<strong>UCxxxx</strong> — or go to YouTube Studio → Settings → Channel → Advanced</div>
         {ytErr&&<div className="alert ar mb12">{ytErr}</div>}
         {ytData&&<>
           <div className="g3 mb16">
