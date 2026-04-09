@@ -246,7 +246,14 @@ Use the frameworks, stories, language and content below as raw material. Draw on
 Frameworks: ${mind.frameworks.map(f=>f.title+": "+f.body).join(" | ")}
 Client stories: ${mind.clientStories.map(s=>s.title+": "+s.body).join(" | ")}
 Contrarian takes: ${mind.contrarian.map(c=>c.title+": "+c.body).join(" | ")}
-Language: ${mind.language.map(l=>l.body).join(" | ")}${cb?.length?`\nContent Bank: ${cb.map(f=>f.title+": "+f.summary+(f.keyIdeas?.length?" Key ideas: "+f.keyIdeas.join(", "):"")).join(" | ")}`:""}
+Language: ${mind.language.map(l=>l.body).join(" | ")}${cb?.length?`\nContent Bank:\n${cb.map(f=>{
+    const detail = f.richSummary||f.summary;
+    const frameworks = f.frameworks?.length ? " Frameworks: "+f.frameworks.join("; ") : "";
+    const stories = f.stories?.length ? " Stories: "+f.stories.join("; ") : "";
+    const stats = f.stats?.length ? " Stats: "+f.stats.join("; ") : "";
+    const ideas = f.keyIdeas?.length ? " Key ideas: "+f.keyIdeas.join(", ") : "";
+    return `[${f.title}] ${detail}${frameworks}${stories}${stats}${ideas}`;
+  }).join("\n\n")}`:""}
 ${rules?`\nWRITING RULES — MUST FOLLOW:\n${rules}`:"NEVER: corporate jargon, bullet lists. Short sentences. Specific numbers. Direct."}`;
 }
 
@@ -497,11 +504,21 @@ function MyMind({ mind, setMind }) {
       }
       if (!text.trim()) throw new Error("No text could be extracted from this file.");
       const truncated = text.slice(0, 40000);
-      setUploadStage("Claude is reading and extracting key ideas...");
+      setUploadStage("Claude is reading and building a full content summary (~1 min)...");
       const raw = await callClaude(
-        `You are a content strategist. Extract the core ideas, frameworks, and language from this business document for use in LinkedIn content creation. Return ONLY valid JSON: {"title":"short descriptive title (max 8 words)","summary":"2-3 sentence overview of the document core value","keyIdeas":["concise idea 1","concise idea 2","up to 8 ideas max"],"frameworks":["framework name and one-line description"],"language":["key phrase or term the business uses"]}`,
+        `You are a senior content strategist extracting material from a business document to fuel LinkedIn content creation. Produce a COMPREHENSIVE, DETAILED extraction — aim for approximately 1000 words across all fields combined. Return ONLY valid JSON with this exact structure:
+{
+  "title": "short descriptive title (max 8 words)",
+  "summary": "2-3 sentence high-level overview for injection into AI prompts",
+  "richSummary": "COMPREHENSIVE 600-900 word deep-dive. Cover: the core thesis and big ideas, each major framework or methodology with enough detail to actually use it, specific stories or case studies mentioned, key statistics or proof points, the author's philosophy and worldview, and practical applications. Write in flowing paragraphs, not bullet points. Be thorough — this is the reference document Claude will draw on when writing posts.",
+  "keyIdeas": ["specific actionable idea with enough context to be useful — aim for 12-15 ideas", "..."],
+  "frameworks": ["Framework Name: detailed description of how it works and when to apply it", "..."],
+  "language": ["specific phrase or term used in this document", "..."],
+  "stories": ["story/case study name: brief description of what happened and the result", "..."],
+  "stats": ["specific number or statistic from the document with its context", "..."]
+}`,
         `Document content:\n\n${truncated}`,
-        1500
+        4000
       );
       const data = JSON.parse(raw);
       const entry = {
@@ -509,9 +526,12 @@ function MyMind({ mind, setMind }) {
         filename: file.name,
         title: data.title || file.name,
         summary: data.summary || "",
+        richSummary: data.richSummary || data.summary || "",
         keyIdeas: data.keyIdeas || [],
         frameworks: data.frameworks || [],
         language: data.language || [],
+        stories: data.stories || [],
+        stats: data.stats || [],
         uploadedAt: new Date().toISOString(),
       };
       setMind(m=>({...m, contentBank: [...(m.contentBank||[]), entry]}));
@@ -571,8 +591,37 @@ function MyMind({ mind, setMind }) {
                   <button className="btn bgh bsm mla" style={{color:"var(--rust)",fontSize:10}} onClick={()=>delContent(f.id)}>Remove</button>
                 </div>
                 <div className="xs muted mb6" style={{fontFamily:"DM Mono,monospace",fontSize:10}}>{f.filename}</div>
-                <div className="meb mb8">{f.summary}</div>
-                {f.keyIdeas?.length>0&&<div className="f g4x fw">{f.keyIdeas.slice(0,6).map(k=><span key={k} className="tag ti">{k}</span>)}</div>}
+                {(f.richSummary||f.summary)&&<div className="meb mb8" style={{whiteSpace:"pre-wrap",lineHeight:1.6}}>{f.richSummary||f.summary}</div>}
+                {f.stats?.length>0&&(
+                  <div className="mb8">
+                    <div className="xs" style={{fontWeight:600,marginBottom:4,color:"var(--ink)"}}>Key Stats</div>
+                    {f.stats.map((s,i)=><div key={i} className="xs muted" style={{marginBottom:2}}>• {s}</div>)}
+                  </div>
+                )}
+                {f.stories?.length>0&&(
+                  <div className="mb8">
+                    <div className="xs" style={{fontWeight:600,marginBottom:4,color:"var(--ink)"}}>Stories & Case Studies</div>
+                    {f.stories.map((s,i)=><div key={i} className="xs muted" style={{marginBottom:2}}>• {s}</div>)}
+                  </div>
+                )}
+                {f.frameworks?.length>0&&(
+                  <div className="mb8">
+                    <div className="xs" style={{fontWeight:600,marginBottom:4,color:"var(--ink)"}}>Frameworks</div>
+                    {f.frameworks.map((fw,i)=><div key={i} className="xs muted" style={{marginBottom:2}}>• {fw}</div>)}
+                  </div>
+                )}
+                {f.keyIdeas?.length>0&&(
+                  <div className="mb8">
+                    <div className="xs" style={{fontWeight:600,marginBottom:4,color:"var(--ink)"}}>Key Ideas</div>
+                    <div className="f g4x fw">{f.keyIdeas.map(k=><span key={k} className="tag ti">{k}</span>)}</div>
+                  </div>
+                )}
+                {f.language?.length>0&&(
+                  <div>
+                    <div className="xs" style={{fontWeight:600,marginBottom:4,color:"var(--ink)"}}>Language</div>
+                    <div className="f g4x fw">{f.language.map(l=><span key={l} className="tag" style={{background:"var(--paper)",border:"1px solid var(--border)",color:"var(--muted)"}}>{l}</span>)}</div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
