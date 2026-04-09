@@ -1,7 +1,7 @@
 // BGB Content Intelligence — Background Service Worker (Chrome MV3)
 
 const LINKEDIN_URL = 'https://www.linkedin.com/analytics/creator/content/?timeRange=past_7_days';
-const APP_URL = 'https://my-app-gilt-eight-89.vercel.app';
+const APP_URL = 'https://bgb.coach';
 
 // ─── MESSAGE HANDLER ─────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

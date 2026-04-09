@@ -6,7 +6,7 @@
   "permissions": ["tabs", "storage", "scripting", "activeTab"],
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "https://my-app-gilt-eight-89.vercel.app/*"
+    "https://bgb.coach/*"
   ],
   "action": {
     "default_popup": "popup.html",
