@@ -2356,7 +2356,6 @@ const NAV = [
   {id:"analytics",label:"Analytics Import",icon:"📥",badge:"analytics"},
   {id:"review",label:"Review Queue",icon:"◐",badge:"review"},
   {id:"report",label:"Weekly Report",icon:"📊"},
-  {id:"analytics",label:"Analytics",icon:"📈"},
   {id:"dna",label:"Content DNA",icon:"🧬"},
   {sec:"Knowledge Banks"},
   {id:"mind",label:"Your Mind",icon:"🧠"},
