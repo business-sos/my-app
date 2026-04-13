@@ -2183,6 +2183,16 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
     });
   },[contentQueue]);
 
+  const saveEdits = (item) => {
+    setContentQueue(q => q.map(qi => qi.id !== item.id ? qi : {
+      ...qi,
+      content: edits[item.id] ?? qi.content,
+      cta: ctaEdits[item.id] ?? qi.cta ?? "",
+      hook: (edits[item.id] ?? qi.content).split('\n')[0].slice(0, 120),
+    }));
+    setExpanded(null);
+  };
+
   const goLive = (item) => {
     // Merge edited CTA back into content before posting
     const editedContent = edits[item.id] ?? item.content;
@@ -2269,8 +2279,8 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
                         />
                         {item.rationale&&<div className="xs muted mb12" style={{fontStyle:"italic"}}>Why now: {item.rationale}</div>}
                         <div className="f g8">
+                          <button className="btn bp" onClick={()=>saveEdits(item)}>Save edits ↑</button>
                           <button className="btn bg" onClick={()=>goLive(item)}>Go Live →</button>
-                          <button className="btn bo bsm" onClick={()=>setExpanded(null)}>Collapse ↑</button>
                           <button className="btn bgh bsm mla" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>Remove</button>
                         </div>
                       </td>
