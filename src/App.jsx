@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 const STYLE = `
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap');
@@ -959,9 +959,28 @@ function Publishing({ posts, setPosts, reviewQueue, setReviewQueue }) {
   );
 }
 
+const TRACKING_TABS = ["All","LI","FB","Insta","YT"];
+const PLATFORM_MAP = { LI:"LinkedIn", FB:"Facebook", Insta:"Instagram", YT:"YouTube" };
+const PLATFORM_LINKS = {
+  LI: ["LinkedIn Analytics","https://www.linkedin.com/analytics/creator/"],
+  FB: ["Facebook Insights","https://www.facebook.com/insights/"],
+  Insta: ["Instagram Insights","https://www.instagram.com/"],
+  YT: ["YouTube Studio","https://studio.youtube.com/"],
+};
+const COLS = {
+  LI:    ["impressions","clicks","reactions","comments","docViews","calls"],
+  FB:    ["impressions","reach","saves","likes","comments","docViews","calls"],
+  Insta: ["impressions","reach","saves","likes","comments","docViews","calls"],
+  YT:    ["views","watchTime","likes","comments","docViews","calls"],
+};
+const COL_LABELS = {
+  impressions:"Impressions", clicks:"Clicks", reactions:"Reactions",
+  comments:"Comments", reach:"Reach", saves:"Saves", likes:"Likes",
+  docViews:"Doc Views 🎯", calls:"Calls", views:"Views", watchTime:"Watch %",
+};
+
 function Tracking({ posts, setPosts }) {
   const published = posts.filter(p=>p.status==="published");
-  const platforms = ["All", ...Array.from(new Set(published.map(p=>p.platform)))];
   const [tab, setTab] = useState("All");
   const [draft, setDraft] = useState({});
   const [saved, setSaved] = useState(false);
@@ -982,40 +1001,64 @@ function Tracking({ posts, setPosts }) {
       }
       const postMsg = Object.keys(counts).length > 0 ? `${Object.keys(counts).length} post${Object.keys(counts).length!==1?"s":""} synced` : "";
       const globalMsg = globalTotal !== null ? `${globalTotal} total offer doc views` : "";
-      setSyncMsg("↻ " + [postMsg, globalMsg].filter(Boolean).join(" · ") || "Synced");
+      setSyncMsg("↻ " + ([postMsg, globalMsg].filter(Boolean).join(" · ") || "Synced"));
     } catch(e) {
       setSyncMsg("Sync failed — check Upstash env vars are set in Vercel");
     } finally { setSyncLoading(false); }
   };
 
-  const visible = tab === "All" ? published : published.filter(p=>p.platform===tab);
-
-  // initialise draft from current post values
-  const initDraft = () => {
+  useEffect(()=>{
     const d = {};
-    published.forEach(p => { d[p.id] = { impressions: p.impressions, engagement: p.engagement, docViews: p.docViews, calls: p.calls }; });
+    published.forEach(p=>{
+      d[p.id] = {
+        impressions: p.impressions??0, engagement: p.engagement??0,
+        docViews: p.docViews??0, calls: p.calls??0,
+        clicks: p.clicks??0, reactions: p.reactions??0,
+        comments: p.comments??0, reach: p.reach??0,
+        saves: p.saves??0, views: p.views??0,
+        watchTime: p.watchTime??0, likes: p.likes??0,
+      };
+    });
     setDraft(d);
-  };
+  }, [posts]);
 
-  useEffect(() => { initDraft(); }, [posts]);
-
-  const set = (id, field, val) => setDraft(d => ({ ...d, [id]: { ...(d[id]||{}), [field]: val } }));
+  const set = (id, field, val) => setDraft(d=>({...d,[id]:{...(d[id]||{}),[field]:val}}));
 
   const saveAll = () => {
-    setPosts(prev => prev.map(p => {
-      const v = draft[p.id];
-      if (!v) return p;
-      return { ...p, impressions: Number(v.impressions||0), engagement: Number(v.engagement||0), docViews: Number(v.docViews||0), calls: Number(v.calls||0) };
+    setPosts(prev=>prev.map(p=>{
+      const v = draft[p.id]; if(!v) return p;
+      const num = f => Number(v[f]||0);
+      return {...p,
+        impressions:num("impressions"), engagement:num("engagement"),
+        docViews:num("docViews"), calls:num("calls"),
+        clicks:num("clicks"), reactions:num("reactions"),
+        comments:num("comments"), reach:num("reach"),
+        saves:num("saves"), views:num("views"),
+        watchTime:num("watchTime"), likes:num("likes"),
+      };
     }));
-    setSaved(true); setTimeout(() => setSaved(false), 2000);
+    setSaved(true); setTimeout(()=>setSaved(false),2000);
   };
 
-  const needsUpdate = p => p.impressions === 0 && p.docViews === 0;
+  const needsUpdate = p => (p.impressions??0)===0 && (p.docViews??0)===0;
+  const totalDV = published.reduce((s,p)=>s+(p.docViews??0),0);
+  const totalImp = published.reduce((s,p)=>s+(p.impressions??0),0);
+  const totalCalls = published.reduce((s,p)=>s+(p.calls??0),0);
+  const dvRate = totalImp>0 ? ((totalDV/totalImp)*1000).toFixed(1) : "—";
 
-  const totalDV = published.reduce((s,p)=>s+p.docViews,0);
-  const totalImp = published.reduce((s,p)=>s+p.impressions,0);
-  const totalCalls = published.reduce((s,p)=>s+p.calls,0);
-  const dvRate = totalImp > 0 ? ((totalDV/totalImp)*1000).toFixed(1) : "—";
+  const platformFilter = tab==="All" ? null : PLATFORM_MAP[tab];
+  const visible = platformFilter ? published.filter(p=>p.platform===platformFilter) : published;
+  const cols = tab!=="All" ? COLS[tab] : null;
+
+  const numInp = (id, field, gold=false) => {
+    const v = draft[id]?.[field] ?? "";
+    return (
+      <input type="number" value={v===""?"":v} onChange={e=>set(id,field,e.target.value)} placeholder="0"
+        style={{width:74,padding:"5px 7px",border:gold?"2px solid var(--gold)":"1px solid var(--border)",borderRadius:2,
+          fontSize:12.5,fontFamily:"DM Mono,monospace",fontWeight:gold?600:400,
+          background:gold?"rgba(201,168,76,0.06)":"var(--paper)"}}/>
+    );
+  };
 
   return (
     <div>
@@ -1037,16 +1080,6 @@ function Tracking({ posts, setPosts }) {
         </div>
       </div>
 
-      {/* weekly checklist banner */}
-      <div className="alert ag mb16">
-        <strong>Weekly data drop.</strong> Open each platform, copy the numbers in, hit Save All. Should take under 5 minutes.
-        <div style={{marginTop:8,display:"flex",gap:16,flexWrap:"wrap"}}>
-          {[["LinkedIn Analytics","https://www.linkedin.com/analytics/creator/"],["Instagram Insights","https://www.instagram.com/"],["YouTube Studio","https://studio.youtube.com/"]].map(([label,url])=>(
-            <a key={label} href={url} target="_blank" rel="noreferrer" className="btn bo bsm">{label} ↗</a>
-          ))}
-        </div>
-      </div>
-
       {/* summary strip */}
       <div className="g4 mb16">
         <div className="sc gold"><div className="sl">Total Doc Views</div><div className="sv">{totalDV}</div></div>
@@ -1055,71 +1088,114 @@ function Tracking({ posts, setPosts }) {
         <div className="sc ink"><div className="sl">Posts Live</div><div className="sv">{published.length}</div></div>
       </div>
 
-      {published.length===0&&<div className="es card"><div className="esi">📊</div><p>No published posts yet.</p></div>}
+      {published.length===0&&<div className="es card"><div className="esi">📊</div><p>No published posts yet. Go Live on a queued post to start tracking.</p></div>}
 
       {published.length>0&&(
-        <div className="card">
-          {/* platform tabs + save button */}
-          <div className="f fac fjb mb16" style={{borderBottom:"1px solid var(--border)",paddingBottom:14}}>
+        <div className="card" style={{padding:0,overflow:"hidden"}}>
+          {/* platform tab bar + save */}
+          <div className="f fac fjb" style={{padding:"12px 16px",borderBottom:"1px solid var(--border)"}}>
             <div className="f g4x">
-              {platforms.map(pl=>(
-                <button key={pl} className={`btn bsm ${tab===pl?"bp":"bo"}`} onClick={()=>setTab(pl)}>{pl}</button>
+              {TRACKING_TABS.map(t=>(
+                <button key={t} className={`btn bsm ${tab===t?"bp":"bo"}`} onClick={()=>setTab(t)}>
+                  {t}
+                </button>
               ))}
             </div>
-            <button className={`btn bsm ${saved?"bsa":"bg"}`} onClick={saveAll}>{saved?"✓ Saved":"Save All →"}</button>
+            <div className="f fac g8">
+              {tab!=="All"&&(
+                <a href={PLATFORM_LINKS[tab]?.[1]} target="_blank" rel="noreferrer"
+                  className="btn bo bsm">{PLATFORM_LINKS[tab]?.[0]} ↗</a>
+              )}
+              <button className={`btn bsm ${saved?"bsa":"bg"}`} onClick={saveAll}>{saved?"✓ Saved":"Save All →"}</button>
+            </div>
           </div>
 
-          {/* compact table */}
-          <table>
-            <thead>
-              <tr>
-                <th style={{width:200}}>Post</th>
-                <th>Platform</th>
-                <th style={{color:"var(--ink60)"}}>Impressions</th>
-                <th style={{color:"var(--ink60)"}}>Engagement</th>
-                <th style={{color:"var(--gold)"}}>Doc Views 🎯</th>
-                <th style={{color:"var(--rust)"}}>Calls</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map(p=>{
-                const v = draft[p.id] || { impressions: p.impressions, engagement: p.engagement, docViews: p.docViews, calls: p.calls };
-                const stale = needsUpdate(p);
-                return (
-                  <tr key={p.id} style={stale?{background:"rgba(201,168,76,0.04)"}:{}}>
-                    <td>
-                      <div style={{fontWeight:600,fontSize:12.5,marginBottom:2}}>{p.title}</div>
-                      <div className="xs muted">{p.date}{stale&&<span style={{color:"var(--rust)",marginLeft:6}}>· needs data</span>}</div>
-                    </td>
-                    <td><span className="tag tb">{p.platform}</span></td>
-                    <td><input type="number" style={{width:90,padding:"5px 8px",border:"1px solid var(--border)",borderRadius:2,fontSize:13,fontFamily:"DM Mono,monospace",background:"var(--paper)"}} value={v.impressions||""} onChange={e=>set(p.id,"impressions",e.target.value)} placeholder="0"/></td>
-                    <td><input type="number" style={{width:90,padding:"5px 8px",border:"1px solid var(--border)",borderRadius:2,fontSize:13,fontFamily:"DM Mono,monospace",background:"var(--paper)"}} value={v.engagement||""} onChange={e=>set(p.id,"engagement",e.target.value)} placeholder="0"/></td>
-                    <td><input type="number" style={{width:90,padding:"5px 8px",border:"2px solid var(--gold)",borderRadius:2,fontSize:13,fontFamily:"DM Mono,monospace",fontWeight:600,background:"rgba(201,168,76,0.06)"}} value={v.docViews||""} onChange={e=>set(p.id,"docViews",e.target.value)} placeholder="0"/></td>
-                    <td><input type="number" style={{width:70,padding:"5px 8px",border:"1px solid var(--border)",borderRadius:2,fontSize:13,fontFamily:"DM Mono,monospace",background:"var(--paper)"}} value={v.calls||""} onChange={e=>set(p.id,"calls",e.target.value)} placeholder="0"/></td>
-                    <td>{p.url&&<a href={p.url} target="_blank" rel="noreferrer" className="btn bo bsm">↗</a>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {/* All tab — read-only summary */}
+          {tab==="All"&&(
+            <table>
+              <thead>
+                <tr>
+                  <th style={{width:"45%"}}>Post</th>
+                  <th>Platform</th>
+                  <th style={{color:"var(--gold)"}}>Doc Views 🎯</th>
+                  <th>Calls</th>
+                  <th>DV/1k</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(p=>{
+                  const dv = p.docViews??0;
+                  const imp = p.impressions??0;
+                  const rate = imp>0?((dv/imp)*1000).toFixed(1):"—";
+                  return (
+                    <tr key={p.id} style={needsUpdate(p)?{background:"rgba(201,168,76,0.04)"}:{}}>
+                      <td>
+                        <div style={{fontWeight:600,fontSize:12.5,marginBottom:2}}>{p.title}</div>
+                        <div className="xs muted">{p.date}{needsUpdate(p)&&<span style={{color:"var(--rust)",marginLeft:6}}>· needs data</span>}</div>
+                      </td>
+                      <td><span className="tag tb">{p.platform}</span></td>
+                      <td style={{color:"var(--gold)",fontWeight:600,fontFamily:"DM Mono,monospace",fontSize:13}}>{dv}</td>
+                      <td style={{fontFamily:"DM Mono,monospace",fontSize:13}}>{p.calls??0}</td>
+                      <td className="xs muted" style={{fontFamily:"DM Mono,monospace"}}>{rate}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
 
-          {/* per-platform totals */}
-          {tab!=="All"&&(()=>{
-            const pts = visible;
-            const ptDV = pts.reduce((s,p)=>s+(draft[p.id]?.docViews||p.docViews),0);
-            const ptImp = pts.reduce((s,p)=>s+(draft[p.id]?.impressions||p.impressions),0);
-            const ptCalls = pts.reduce((s,p)=>s+(draft[p.id]?.calls||p.calls),0);
-            return (
-              <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid var(--border)",display:"flex",gap:24}}>
-                <span className="xs muted">{tab} totals:</span>
-                <span className="xs"><strong>{ptImp.toLocaleString()}</strong> impressions</span>
-                <span className="xs" style={{color:"var(--gold)"}}><strong>{ptDV}</strong> doc views</span>
-                <span className="xs"><strong>{ptCalls}</strong> calls</span>
-                <span className="xs muted">{ptImp>0?((ptDV/ptImp)*1000).toFixed(1):"—"} DV/1k imp</span>
-              </div>
-            );
-          })()}
+          {/* Platform-specific editable table */}
+          {tab!=="All"&&(
+            <>
+              {visible.length===0&&(
+                <div style={{padding:"32px 20px",textAlign:"center",color:"var(--ink60)"}}>
+                  <div className="xs muted">No {PLATFORM_MAP[tab]} posts yet. Posts go live when you hit Go Live in the Content Queue.</div>
+                </div>
+              )}
+              {visible.length>0&&(
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{width:"30%"}}>Post</th>
+                      {cols.map(c=>(
+                        <th key={c} style={{color:c==="docViews"?"var(--gold)":undefined}}>{COL_LABELS[c]}</th>
+                      ))}
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map(p=>(
+                      <tr key={p.id} style={needsUpdate(p)?{background:"rgba(201,168,76,0.04)"}:{}}>
+                        <td>
+                          <div style={{fontWeight:600,fontSize:12.5,marginBottom:2}}>{p.title}</div>
+                          <div className="xs muted">{p.date}{needsUpdate(p)&&<span style={{color:"var(--rust)",marginLeft:6}}>· needs data</span>}</div>
+                        </td>
+                        {cols.map(c=>(
+                          <td key={c}>{numInp(p.id, c, c==="docViews")}</td>
+                        ))}
+                        <td>{p.url&&<a href={p.url} target="_blank" rel="noreferrer" className="btn bo bsm">↗</a>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {/* per-platform totals */}
+              {visible.length>0&&(()=>{
+                const ptDV = visible.reduce((s,p)=>s+Number(draft[p.id]?.docViews||p.docViews||0),0);
+                const ptImp = visible.reduce((s,p)=>s+Number(draft[p.id]?.impressions||p.impressions||0),0);
+                const ptCalls = visible.reduce((s,p)=>s+Number(draft[p.id]?.calls||p.calls||0),0);
+                return (
+                  <div style={{padding:"12px 16px",borderTop:"1px solid var(--border)",display:"flex",gap:24,flexWrap:"wrap"}}>
+                    <span className="xs muted">{PLATFORM_MAP[tab]} totals:</span>
+                    <span className="xs"><strong>{ptImp.toLocaleString()}</strong> impressions</span>
+                    <span className="xs" style={{color:"var(--gold)"}}><strong>{ptDV}</strong> doc views</span>
+                    <span className="xs"><strong>{ptCalls}</strong> calls</span>
+                    <span className="xs muted">{ptImp>0?((ptDV/ptImp)*1000).toFixed(1):"—"} DV/1k imp</span>
+                  </div>
+                );
+              })()}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -1665,26 +1741,29 @@ async function analyzeFacebookHistory(posts, mind) {
 
 // ─── ANALYTICS PAGE ──────────────────────────────────────────────────────────
 function AnalyticsPage({ mind, setMind, formats, analyticsImport, setAnalyticsImport }) {
-  const [liData,setLiData] = useState(()=>{try{const s=localStorage.getItem("bgb_li_data");return s?JSON.parse(s):null;}catch{return null;}}); const [liErr,setLiErr] = useState(""); const [liAnalysis,setLiAnalysis] = useState(null); const [liALoading,setLiALoading] = useState(false);
+  const lsGet2 = (key, fallback) => { try { const s=localStorage.getItem(key); return s?JSON.parse(s):fallback; } catch{ return fallback; } };
+  const [liData,setLiData] = useState(()=>lsGet2("bgb_li_data",null)); const [liErr,setLiErr] = useState(""); const [liAnalysis,setLiAnalysis] = useState(()=>lsGet2("bgb_li_analysis",null)); const [liALoading,setLiALoading] = useState(false);
   const [liParsing,setLiParsing] = useState(false); const [liParseErr,setLiParseErr] = useState("");
   useEffect(()=>{ if(liData) localStorage.setItem("bgb_li_data",JSON.stringify(liData)); else localStorage.removeItem("bgb_li_data"); },[liData]);
+  useEffect(()=>{ if(liAnalysis) localStorage.setItem("bgb_li_analysis",JSON.stringify(liAnalysis)); else localStorage.removeItem("bgb_li_analysis"); },[liAnalysis]);
   const [igToken,setIgToken] = useState(()=>localStorage.getItem("bgb_ig_token")||"");
+  useEffect(()=>{ localStorage.setItem("bgb_ig_token",igToken); },[igToken]);
   const [igData,setIgData] = useState(null); const [igLoading,setIgLoading] = useState(false); const [igErr,setIgErr] = useState(""); const [igAnalysis,setIgAnalysis] = useState(null); const [igALoading,setIgALoading] = useState(false); const [igSetup,setIgSetup] = useState(false);
   const [fbPosts,setFbPosts] = useState([]); const [fbErr,setFbErr] = useState(""); const [fbAnalysis,setFbAnalysis] = useState(null); const [fbALoading,setFbALoading] = useState(false);
   const [ytKey,setYtKey] = useState(()=>localStorage.getItem("bgb_yt_key")||"");
   const [ytChannelId,setYtChannelId] = useState(()=>localStorage.getItem("bgb_yt_channel_id")||"");
+  useEffect(()=>{ localStorage.setItem("bgb_yt_key",ytKey); },[ytKey]);
+  useEffect(()=>{ localStorage.setItem("bgb_yt_channel_id",ytChannelId); },[ytChannelId]);
   const [ytData,setYtData] = useState(null); const [ytLoading,setYtLoading] = useState(false); const [ytErr,setYtErr] = useState(""); const [ytAnalysis,setYtAnalysis] = useState(null); const [ytALoading,setYtALoading] = useState(false); const [ytSetup,setYtSetup] = useState(false);
 
   const pullIG = async () => {
     if(!igToken.trim()) return;
-    localStorage.setItem("bgb_ig_token",igToken);
     setIgLoading(true); setIgErr(""); setIgData(null); setIgAnalysis(null);
     try { setIgData(await pullInstagramAnalytics(igToken)); }
     catch(e){ setIgErr(e.message); } finally { setIgLoading(false); }
   };
   const pullYT = async () => {
     if(!ytKey.trim()||!ytChannelId.trim()) return;
-    localStorage.setItem("bgb_yt_key",ytKey); localStorage.setItem("bgb_yt_channel_id",ytChannelId);
     setYtLoading(true); setYtErr(""); setYtData(null); setYtAnalysis(null);
     try { setYtData(await pullYouTubeAnalytics(ytKey,ytChannelId)); }
     catch(e){ setYtErr(e.message); } finally { setYtLoading(false); }
@@ -2086,57 +2165,123 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
   const [edits, setEdits] = useState(()=>
     contentQueue.reduce((acc,item)=>({...acc,[item.id]:item.content}),[])
   );
-  // Keep edits in sync when new items arrive
+  const [ctaEdits, setCtaEdits] = useState(()=>
+    contentQueue.reduce((acc,item)=>({...acc,[item.id]:item.cta||""}),[])
+  );
+  const [expanded, setExpanded] = useState(null);
+
   useEffect(()=>{
     setEdits(prev=>{
       const next={...prev};
       contentQueue.forEach(item=>{ if(next[item.id]===undefined) next[item.id]=item.content; });
       return next;
     });
+    setCtaEdits(prev=>{
+      const next={...prev};
+      contentQueue.forEach(item=>{ if(next[item.id]===undefined) next[item.id]=item.cta||""; });
+      return next;
+    });
   },[contentQueue]);
+
+  const goLive = (item) => {
+    // Merge edited CTA back into content before posting
+    const editedContent = edits[item.id] ?? item.content;
+    const editedCta = ctaEdits[item.id] ?? item.cta ?? "";
+    const merged = editedCta
+      ? editedContent.replace(/bgb\.coach\/offer[^\s]*/g, editedCta).replace(/\n*$/, "\n\n" + editedCta).replace(/(\n\n[^\n]+)\n\n\1$/, "$1")
+      : editedContent;
+    postFromQueue({...item, cta: editedCta}, merged);
+  };
 
   if (contentQueue.length === 0) {
     return (
       <div className="card" style={{textAlign:"center",padding:56}}>
         <div style={{fontSize:34,marginBottom:12}}>▦</div>
         <div className="serif" style={{fontSize:19,marginBottom:6}}>Queue is empty</div>
-        <div className="muted sm">Generate posts and add them here. When you're ready to go live, hit Copy & Post.</div>
+        <div className="muted sm">Generate posts and add them here. When you're ready to go live, hit Go Live.</div>
       </div>
     );
   }
+
   return (
     <div>
       <div className="alert ag mb16">
-        <strong>{contentQueue.length} post{contentQueue.length!==1?"s":""} queued.</strong> Review the full post including CTA, edit if needed, then hit Copy & Post — content goes to clipboard with the tracked link injected automatically.
+        <strong>{contentQueue.length} post{contentQueue.length!==1?"s":""} queued.</strong> Click any row to edit. Hit Go Live → content copies to clipboard with the tracked link injected.
       </div>
-      {contentQueue.map(item=>(
-        <div key={item.id} className="card mb12">
-          <div className="f fac g8 mb10">
-            <span className="tag tb">{item.platform}</span>
-            {item.theme&&<span className="tag tg">{item.theme}</span>}
-            {item.format&&<span className="tag ti">{item.format}</span>}
-            <span className="xs muted mla">{new Date(item.addedAt).toLocaleDateString("en-AU",{day:"numeric",month:"short"})}</span>
-          </div>
-          {item.hook&&<div style={{fontWeight:600,fontSize:13.5,marginBottom:8}}>{item.hook}</div>}
-          <textarea
-            className="ta"
-            style={{minHeight:220,fontSize:13,lineHeight:1.7,marginBottom:8}}
-            value={edits[item.id]??item.content}
-            onChange={e=>setEdits(prev=>({...prev,[item.id]:e.target.value}))}
-          />
-          {item.cta&&(
-            <div style={{background:"rgba(201,168,76,0.08)",border:"1px solid rgba(201,168,76,0.3)",borderRadius:2,padding:"8px 12px",marginBottom:10}}>
-              <div className="xs" style={{fontFamily:"DM Mono,monospace",color:"var(--gold)",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>CTA being tested</div>
-              <div className="xs" style={{color:"var(--ink)"}}>{item.cta}</div>
-            </div>
-          )}
-          {item.rationale&&<div className="xs muted mb10" style={{fontStyle:"italic"}}>Why now: {item.rationale}</div>}
-          <div className="f g8">
-            <button className="btn bg" onClick={()=>postFromQueue(item, edits[item.id])}>Copy & Post →</button>
-            <button className="btn bgh bsm mla" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>Remove</button>
-          </div>
-        </div>
-      ))}
+      <div className="card" style={{padding:0,overflow:"hidden"}}>
+        <table>
+          <thead>
+            <tr>
+              <th style={{width:"40%"}}>Hook</th>
+              <th>Platform</th>
+              <th>Format</th>
+              <th>Theme</th>
+              <th>Added</th>
+              <th style={{width:140}}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {contentQueue.map(item=>{
+              const isOpen = expanded === item.id;
+              return (
+                <React.Fragment key={item.id}>
+                  {/* compact row */}
+                  <tr
+                    onClick={()=>setExpanded(isOpen ? null : item.id)}
+                    style={{cursor:"pointer", background: isOpen ? "var(--cream)" : undefined}}
+                  >
+                    <td>
+                      <div style={{fontWeight:600,fontSize:13,lineHeight:1.4}}>
+                        {(item.hook||item.content||"").slice(0,90)}{((item.hook||item.content||"").length>90)?"…":""}
+                      </div>
+                    </td>
+                    <td><span className="tag tb">{item.platform||"LinkedIn"}</span></td>
+                    <td><span className="tag ti" style={{fontSize:10}}>{item.format||"—"}</span></td>
+                    <td><span className="tag tg" style={{fontSize:10}}>{item.theme||"—"}</span></td>
+                    <td className="xs muted">{new Date(item.addedAt).toLocaleDateString("en-AU",{day:"numeric",month:"short"})}</td>
+                    <td onClick={e=>e.stopPropagation()}>
+                      <div className="f g6" style={{justifyContent:"flex-end"}}>
+                        <button className="btn bg bsm" onClick={()=>goLive(item)}>Go Live →</button>
+                        <button className="btn bgh bsm" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                  {/* expanded edit row */}
+                  {isOpen&&(
+                    <tr style={{background:"var(--cream)"}}>
+                      <td colSpan={6} style={{padding:"16px 20px 20px"}}>
+                        <div className="xs muted mb8" style={{textTransform:"uppercase",letterSpacing:1,fontFamily:"DM Mono,monospace"}}>Edit post</div>
+                        <textarea
+                          className="ta"
+                          style={{minHeight:200,fontSize:13,lineHeight:1.75,marginBottom:12}}
+                          value={edits[item.id]??item.content}
+                          onChange={e=>setEdits(prev=>({...prev,[item.id]:e.target.value}))}
+                          onClick={e=>e.stopPropagation()}
+                        />
+                        <div className="xs muted mb6" style={{textTransform:"uppercase",letterSpacing:1,fontFamily:"DM Mono,monospace",color:"var(--gold)"}}>CTA line</div>
+                        <input
+                          className="inp"
+                          style={{marginBottom:14,borderColor:"var(--gold)",fontSize:13,fontFamily:"DM Mono,monospace"}}
+                          value={ctaEdits[item.id]??item.cta??""}
+                          onChange={e=>setCtaEdits(prev=>({...prev,[item.id]:e.target.value}))}
+                          placeholder="bgb.coach/offer → ..."
+                          onClick={e=>e.stopPropagation()}
+                        />
+                        {item.rationale&&<div className="xs muted mb12" style={{fontStyle:"italic"}}>Why now: {item.rationale}</div>}
+                        <div className="f g8">
+                          <button className="btn bg" onClick={()=>goLive(item)}>Go Live →</button>
+                          <button className="btn bo bsm" onClick={()=>setExpanded(null)}>Collapse ↑</button>
+                          <button className="btn bgh bsm mla" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>Remove</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2285,10 +2430,12 @@ export default function App() {
   useEffect(()=>{ localStorage.setItem("bgb_bestpractice",JSON.stringify(bestPractice)); },[bestPractice]);
   // ─────────────────────────────────────────────────────────────────────────
 
-  const [assets,setAssets] = useState([]);
+  const [assets,setAssets] = useState(()=>lsGet("bgb_assets",[]));
+  useEffect(()=>{ localStorage.setItem("bgb_assets",JSON.stringify(assets)); },[assets]);
   const [analyticsImport,setAnalyticsImport] = useState(null);
   const [instagramImport,setInstagramImport] = useState(null);
-  const [contentQueue,setContentQueue] = useState([]);
+  const [contentQueue,setContentQueue] = useState(()=>lsGet("bgb_queue",[]));
+  useEffect(()=>{ localStorage.setItem("bgb_queue",JSON.stringify(contentQueue)); },[contentQueue]);
   useEffect(()=>{
     const handler = e => { setAnalyticsImport(e.detail); setPage("analytics"); };
     window.addEventListener("bgb-analytics-import", handler);
@@ -2329,6 +2476,8 @@ export default function App() {
       format: item.format,
       cta: item.cta||"",
       impressions: 0, engagement: 0, docViews: 0, calls: 0,
+      clicks: 0, reactions: 0, comments: 0, reach: 0,
+      saves: 0, views: 0, watchTime: 0, likes: 0,
       trackedLink,
       url: "", isTest: false, testGroup: null, proven: false, daysLive: 0,
     };
