@@ -2161,13 +2161,21 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules
   );
 }
 
+const ALL_PLATFORMS = ["LinkedIn","Facebook","Instagram","YouTube"];
+
 function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
+  const initPlatforms = (q) => q.reduce((acc,item)=>({
+    ...acc,
+    [item.id]: item.platforms ?? [item.platform||"LinkedIn"],
+  }),{});
+
   const [edits, setEdits] = useState(()=>
     contentQueue.reduce((acc,item)=>({...acc,[item.id]:item.content}),[])
   );
   const [ctaEdits, setCtaEdits] = useState(()=>
     contentQueue.reduce((acc,item)=>({...acc,[item.id]:item.cta||""}),[])
   );
+  const [platformSel, setPlatformSel] = useState(()=>initPlatforms(contentQueue));
   const [expanded, setExpanded] = useState(null);
 
   useEffect(()=>{
@@ -2181,26 +2189,42 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
       contentQueue.forEach(item=>{ if(next[item.id]===undefined) next[item.id]=item.cta||""; });
       return next;
     });
+    setPlatformSel(prev=>{
+      const next={...prev};
+      contentQueue.forEach(item=>{ if(!next[item.id]) next[item.id]=item.platforms??[item.platform||"LinkedIn"]; });
+      return next;
+    });
   },[contentQueue]);
 
+  const togglePlatform = (itemId, plat) => {
+    setPlatformSel(prev=>{
+      const cur = prev[itemId]||[];
+      return {...prev, [itemId]: cur.includes(plat) ? cur.filter(p=>p!==plat) : [...cur,plat]};
+    });
+  };
+
   const saveEdits = (item) => {
+    const platforms = platformSel[item.id]||[item.platform||"LinkedIn"];
     setContentQueue(q => q.map(qi => qi.id !== item.id ? qi : {
       ...qi,
       content: edits[item.id] ?? qi.content,
       cta: ctaEdits[item.id] ?? qi.cta ?? "",
       hook: (edits[item.id] ?? qi.content).split('\n')[0].slice(0, 120),
+      platforms,
+      platform: platforms[0]||"LinkedIn",
     }));
     setExpanded(null);
   };
 
   const goLive = (item) => {
-    // Merge edited CTA back into content before posting
     const editedContent = edits[item.id] ?? item.content;
     const editedCta = ctaEdits[item.id] ?? item.cta ?? "";
     const merged = editedCta
       ? editedContent.replace(/bgb\.coach\/offer[^\s]*/g, editedCta).replace(/\n*$/, "\n\n" + editedCta).replace(/(\n\n[^\n]+)\n\n\1$/, "$1")
       : editedContent;
-    postFromQueue({...item, cta: editedCta}, merged);
+    const platforms = platformSel[item.id]||[item.platform||"LinkedIn"];
+    if (!platforms.length) { alert("Select at least one platform."); return; }
+    platforms.forEach(plat => postFromQueue({...item, platform: plat, cta: editedCta}, merged));
   };
 
   if (contentQueue.length === 0) {
@@ -2245,7 +2269,13 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
                         {(item.hook||item.content||"").slice(0,90)}{((item.hook||item.content||"").length>90)?"…":""}
                       </div>
                     </td>
-                    <td><span className="tag tb">{item.platform||"LinkedIn"}</span></td>
+                    <td>
+                      <div className="f g4 fw">
+                        {(item.platforms??[item.platform||"LinkedIn"]).map(p=>(
+                          <span key={p} className="tag tb" style={{fontSize:10}}>{p}</span>
+                        ))}
+                      </div>
+                    </td>
                     <td><span className="tag ti" style={{fontSize:10}}>{item.format||"—"}</span></td>
                     <td><span className="tag tg" style={{fontSize:10}}>{item.theme||"—"}</span></td>
                     <td className="xs muted">{new Date(item.addedAt).toLocaleDateString("en-AU",{day:"numeric",month:"short"})}</td>
@@ -2278,6 +2308,23 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
                           onClick={e=>e.stopPropagation()}
                         />
                         {item.rationale&&<div className="xs muted mb12" style={{fontStyle:"italic"}}>Why now: {item.rationale}</div>}
+                        <div className="xs muted mb6" style={{textTransform:"uppercase",letterSpacing:1,fontFamily:"DM Mono,monospace"}}>Post to</div>
+                        <div className="f g16 mb16" onClick={e=>e.stopPropagation()}>
+                          {ALL_PLATFORMS.map(plat=>{
+                            const checked = (platformSel[item.id]||[item.platform||"LinkedIn"]).includes(plat);
+                            return (
+                              <label key={plat} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:checked?600:400}}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={()=>togglePlatform(item.id, plat)}
+                                  style={{accentColor:"var(--gold)",width:15,height:15}}
+                                />
+                                {plat}
+                              </label>
+                            );
+                          })}
+                        </div>
                         <div className="f g8">
                           <button className="btn bp" onClick={()=>saveEdits(item)}>Save edits ↑</button>
                           <button className="btn bg" onClick={()=>goLive(item)}>Go Live →</button>
