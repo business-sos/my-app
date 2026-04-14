@@ -2177,6 +2177,31 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
   );
   const [platformSel, setPlatformSel] = useState(()=>initPlatforms(contentQueue));
   const [expanded, setExpanded] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+  const [newDraft, setNewDraft] = useState({content:"",cta:"",platforms:["LinkedIn"],format:"",theme:""});
+
+  const toggleNewPlatform = (plat) => setNewDraft(d=>{
+    const cur = d.platforms;
+    return {...d, platforms: cur.includes(plat) ? cur.filter(p=>p!==plat) : [...cur,plat]};
+  });
+
+  const addManual = () => {
+    if (!newDraft.content.trim()) return;
+    setContentQueue(q=>[{
+      id: Date.now()+Math.random(),
+      content: newDraft.content,
+      hook: newDraft.content.split('\n')[0].slice(0,120),
+      cta: newDraft.cta,
+      platform: newDraft.platforms[0]||"LinkedIn",
+      platforms: newDraft.platforms.length ? newDraft.platforms : ["LinkedIn"],
+      format: newDraft.format,
+      theme: newDraft.theme,
+      rationale: "",
+      addedAt: new Date().toISOString(),
+    },...q]);
+    setNewDraft({content:"",cta:"",platforms:["LinkedIn"],format:"",theme:""});
+    setShowNew(false);
+  };
 
   useEffect(()=>{
     setEdits(prev=>{
@@ -2227,21 +2252,71 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
     platforms.forEach(plat => postFromQueue({...item, platform: plat, cta: editedCta}, merged));
   };
 
+  const NewPostForm = () => (
+    <div className="card mb16" style={{borderColor:"var(--gold)",borderWidth:1.5}}>
+      <div className="ct">✦ New post
+        <div className="cta"><button className="btn bgh bsm" onClick={()=>{setShowNew(false);setNewDraft({content:"",cta:"",platforms:["LinkedIn"],format:"",theme:""});}}>Cancel</button></div>
+      </div>
+      <textarea className="ta" style={{minHeight:160,fontSize:13,lineHeight:1.75,marginBottom:12}}
+        placeholder="Paste or write your post content here…"
+        value={newDraft.content} onChange={e=>setNewDraft(d=>({...d,content:e.target.value}))} autoFocus/>
+      <div className="xs muted mb6" style={{textTransform:"uppercase",letterSpacing:1,fontFamily:"DM Mono,monospace",color:"var(--gold)"}}>CTA line</div>
+      <input className="inp" style={{marginBottom:14,borderColor:"var(--gold)",fontSize:13,fontFamily:"DM Mono,monospace"}}
+        placeholder="bgb.coach/offer → ..." value={newDraft.cta} onChange={e=>setNewDraft(d=>({...d,cta:e.target.value}))}/>
+      <div className="f g12 mb14">
+        <div style={{flex:1}}>
+          <div className="xs muted mb6" style={{textTransform:"uppercase",letterSpacing:1,fontFamily:"DM Mono,monospace"}}>Format</div>
+          <input className="inp" style={{fontSize:12}} placeholder="e.g. Framework Drop" value={newDraft.format} onChange={e=>setNewDraft(d=>({...d,format:e.target.value}))}/>
+        </div>
+        <div style={{flex:1}}>
+          <div className="xs muted mb6" style={{textTransform:"uppercase",letterSpacing:1,fontFamily:"DM Mono,monospace"}}>Theme</div>
+          <input className="inp" style={{fontSize:12}} placeholder="e.g. Leadership" value={newDraft.theme} onChange={e=>setNewDraft(d=>({...d,theme:e.target.value}))}/>
+        </div>
+      </div>
+      <div className="xs muted mb6" style={{textTransform:"uppercase",letterSpacing:1,fontFamily:"DM Mono,monospace"}}>Post to</div>
+      <div className="f g16 mb16">
+        {ALL_PLATFORMS.map(plat=>{
+          const checked = newDraft.platforms.includes(plat);
+          return (
+            <label key={plat} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:checked?600:400}}>
+              <input type="checkbox" checked={checked} onChange={()=>toggleNewPlatform(plat)} style={{accentColor:"var(--gold)",width:15,height:15}}/>
+              {plat}
+            </label>
+          );
+        })}
+      </div>
+      <div className="f g8">
+        <button className="btn bp" onClick={addManual} disabled={!newDraft.content.trim()}>Add to Queue →</button>
+        <button className="btn bo bsm" onClick={()=>{setShowNew(false);setNewDraft({content:"",cta:"",platforms:["LinkedIn"],format:"",theme:""});}}>Cancel</button>
+      </div>
+    </div>
+  );
+
   if (contentQueue.length === 0) {
     return (
-      <div className="card" style={{textAlign:"center",padding:56}}>
-        <div style={{fontSize:34,marginBottom:12}}>▦</div>
-        <div className="serif" style={{fontSize:19,marginBottom:6}}>Queue is empty</div>
-        <div className="muted sm">Generate posts and add them here. When you're ready to go live, hit Go Live.</div>
+      <div>
+        {showNew && <NewPostForm/>}
+        {!showNew && (
+          <div className="card" style={{textAlign:"center",padding:56}}>
+            <div style={{fontSize:34,marginBottom:12}}>▦</div>
+            <div className="serif" style={{fontSize:19,marginBottom:6}}>Queue is empty</div>
+            <div className="muted sm mb20">Generate posts or add your own writing, videos, and repurposed content.</div>
+            <button className="btn bp" onClick={()=>setShowNew(true)}>+ Add post</button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div>
-      <div className="alert ag mb16">
-        <strong>{contentQueue.length} post{contentQueue.length!==1?"s":""} queued.</strong> Click any row to edit. Hit Go Live → content copies to clipboard with the tracked link injected.
+      <div className="f fac fjb mb16">
+        <div className="alert ag" style={{flex:1,marginBottom:0}}>
+          <strong>{contentQueue.length} post{contentQueue.length!==1?"s":""} queued.</strong> Click any row to edit. Hit Go Live → content copies to clipboard with the tracked link injected.
+        </div>
+        <button className="btn bp bsm" style={{marginLeft:12,whiteSpace:"nowrap"}} onClick={()=>{setShowNew(v=>!v);}}>{showNew?"✕ Cancel":"+ Add post"}</button>
       </div>
+      {showNew && <NewPostForm/>}
       <div className="card" style={{padding:0,overflow:"hidden"}}>
         <table>
           <thead>
