@@ -231,7 +231,7 @@ async function callClaude(sys, user, maxTokens=2000) {
   const raw=d.content.map(b=>b.text||"").join("");const match=raw.match(/\{[\s\S]*\}/);if(!match)throw new Error("No JSON found");return match[0];
 }
 
-function voiceCtx(mind, rules) {
+function voiceCtx(mind) {
   const cb = mind.contentBank?.filter(f=>f.summary);
   return `STEPHEN'S VOICE — SOURCE MATERIAL:
 Use the frameworks, stories, language and content below as raw material. Draw on the concepts, proof points, and angles — apply your own intelligence to how they are expressed. Never copy these verbatim into posts.
@@ -245,8 +245,14 @@ Language: ${mind.language.map(l=>l.body).join(" | ")}${cb?.length?`\nContent Ban
     const stats = f.stats?.length ? " Stats: "+f.stats.join("; ") : "";
     const ideas = f.keyIdeas?.length ? " Key ideas: "+f.keyIdeas.join(", ") : "";
     return `[${f.title}] ${detail}${frameworks}${stories}${stats}${ideas}`;
-  }).join("\n\n")}`:""}
-${rules?`\nWRITING RULES — MUST FOLLOW:\n${rules}`:"NEVER: corporate jargon, bullet lists. Short sentences. Specific numbers. Direct."}`;
+  }).join("\n\n")}`:""}`;
+}
+
+function rulesCtx(rules) {
+  const r = rules && rules.trim();
+  return r
+    ? `WRITING RULES — NON-NEGOTIABLE. These override everything above. Violating any rule is a failure.\n${r}`
+    : `WRITING RULES — NON-NEGOTIABLE: Never use corporate jargon or bullet lists. Short sentences. Specific numbers. Direct voice.`;
 }
 
 function fmtCtx(formats) {
@@ -332,7 +338,7 @@ Hedging where genuine: Occasionally "tends to", "in most cases", "usually" sound
 
 async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[], writingRules="", skill="standard") {
   const raw2 = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\n${antiAICtx()}${skillCtx(skill)?"\n"+skillCtx(skill):""}\nIf no theme/format specified, pick the best ones from the knowledge banks.\nCTA RULE: Every variation MUST end with a CTA line pointing to bgb.coach/offer. Each variation must use a DIFFERENT CTA angle so we can test which converts best. Vary the wording — examples: "Get the full framework → bgb.coach/offer" / "See exactly how we fixed this → bgb.coach/offer" / "The BGB playbook behind this → bgb.coach/offer" / "If this sounds like your business → bgb.coach/offer". Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3\n\nCTA LINE","cta":"CTA LINE"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post\n\nCTA LINE","cta":"CTA LINE"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\n${antiAICtx()}${skillCtx(skill)?"\n"+skillCtx(skill):""}\nIf no theme/format specified, pick the best ones from the knowledge banks.\nCTA RULE: Every variation MUST end with a CTA line pointing to bgb.coach/offer. Each variation must use a DIFFERENT CTA angle so we can test which converts best. Vary the wording — examples: "Get the full framework → bgb.coach/offer" / "See exactly how we fixed this → bgb.coach/offer" / "The BGB playbook behind this → bgb.coach/offer" / "If this sounds like your business → bgb.coach/offer". Include the CTA as the last line of content AND as a separate "cta" field.\n${rulesCtx(writingRules)}\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3\n\nCTA LINE","cta":"CTA LINE"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post\n\nCTA LINE","cta":"CTA LINE"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
     `Raw input:\n${raw||"Pick the most compelling BGB topic right now based on the knowledge banks."}\n\nTheme: ${theme||"auto-pick best"}\nFormat: ${fmt||"auto-pick best"}`,
     3000
   );
@@ -341,7 +347,7 @@ async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[], writing
 
 async function genWeekPosts(mind, formats, writingRules="", skill="standard") {
   const raw = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\n${antiAICtx()}${skillCtx(skill)?"\n"+skillCtx(skill):""}\nCTA RULE: Every post MUST end with a CTA line pointing to bgb.coach/offer. Each of the 5 posts must use a DIFFERENT CTA angle to test which converts best — vary the wording and tone. Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks\\n\\nCTA LINE","cta":"CTA LINE","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind)}\n${fmtCtx(formats)}\n${antiAICtx()}${skillCtx(skill)?"\n"+skillCtx(skill):""}\nCTA RULE: Every post MUST end with a CTA line pointing to bgb.coach/offer. Each of the 5 posts must use a DIFFERENT CTA angle to test which converts best — vary the wording and tone. Include the CTA as the last line of content AND as a separate "cta" field.\n${rulesCtx(writingRules)}\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks\\n\\nCTA LINE","cta":"CTA LINE","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
     `Generate 5 varied LinkedIn posts for the week. Cover different angles of the BGB positioning — delegation, GM install, owner freedom, founder trap, scaling. Mix proven and testing formats.`,
     4000
   );
