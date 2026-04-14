@@ -268,18 +268,66 @@ function bpCtx(bp) {
   return parts.length?"INTERNET BEST PRACTICES (use to inform structure/hooks, always filtered through Stephen's voice):\n"+parts.join("\n"):"";
 }
 
-async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[], writingRules="") {
+// ─── SKILL CONTEXT INJECTORS (from community skill repos) ─────────────────────
+// Sources: az9713/ai-co-writing-claude-skills, haowjy/creative-writing-skills,
+//          AgriciDaniel/claude-blog, alirezarezvani/claude-skills
+function skillCtx(skill) {
+  if (!skill || skill === "standard") return "";
+
+  if (skill === "linkedin") return `
+LINKEDIN STRATEGIC SKILL — APPLY THESE PRINCIPLES:
+Hook Architecture: Every post must open with a pattern-interrupt hook using one of: bold counter-intuitive claim, specific number/result, "Most [group] think X — they're wrong", direct provocative statement. The hook is the entire post. If the hook doesn't stop the scroll, the post fails.
+Content Pillar Distribution: Rotate through — 30% insights/how-to (practical, teaches something), 25% behind-the-scenes (real process, messy truth), 20% social proof/results (specific client outcomes with numbers), 15% contrarian takes (challenge conventional wisdom), 10% personal stories (vulnerability + business lesson).
+Post Architecture: Hook (1 line) → Tension/problem (2-3 lines) → Resolution/insight (3-5 lines) → Proof (specific number or client outcome) → CTA (1 line). Separate each section with a line break.
+Strategic Repurposing: If topic is a framework, give the practical LinkedIn version. If a story, extract the teachable principle. If a result, lead with the number.
+Engagement Trigger: End body content (before CTA) with a statement that rewards rereading — a twist, a reframe, or an unexpected admission.`;
+
+  if (skill === "narrative") return `
+NARRATIVE CRAFT SKILL — APPLY THESE PRINCIPLES:
+Scene Entry: Start mid-action or mid-conversation. Never set up context first. Drop the reader into the moment.
+Purpose Clarity: Every sentence must shift something — the reader's understanding, emotional state, or belief. Cut anything that merely repeats or transitions.
+Showing Over Telling: Replace abstractions with specific physical/observable details. Not "he was stressed" → "he called me three times in one afternoon."
+Dialogue Layering: When quoting clients or conversations, give it two simultaneous goals — reveal character AND advance the point.
+Pacing Variation: Short sentences for impact. Then a longer one that carries weight and moves the reader through a shift in thinking. Then short again.
+Sensory Grounding: Ground abstract business concepts in concrete details — the conversation, the email, the exact moment the client realised.
+Interiority Depth: Show the internal moment — the decision point, the realisation, the thing that changed. Be specific about what shifted and why.
+Invisible Setup: Plant the key proof point or insight early, don't announce it. Let the reader arrive at it.`;
+
+  if (skill === "voice-dna") return `
+VOICE DNA SKILL — MAXIMUM VOICE FIDELITY:
+Core Essence: Direct, unimpressed, results-obsessed. No cheerleading. No motivation. Just what's true, specific, and happened.
+Emotional Palette: Confident without arrogance, slightly impatient with mediocrity, deeply respectful of real execution. Never outraged, never sycophantic.
+Signature Construction: Short declarative sentences. When listing, don't bullet — stack single lines. The most important thing goes last, not first.
+Power Word Filter: Prefer: installed, escaped, freed, exact, specific numbers, "the thing that actually..." — avoid: leveraged, synergised, unlocked, transformed, game-changer.
+ICP Targeting: Always write to the owner who already suspects they're the bottleneck. Don't sell them on the idea — they already feel it. Show them the exit.
+Audience Mirror: The reader should think "this is about me" by line 3. Use "you", "your team", "your calendar" — not generic "business owners".
+Voice Test: If it sounds like a LinkedIn influencer, rewrite. If it sounds like Stephen talking to a client he respects, it's right.`;
+
+  if (skill === "blog") return `
+LONG-FORM / BLOG SKILL — APPLY THESE PRINCIPLES:
+Answer-First Structure: Every major point opens with a direct 2-3 sentence answer before the explanation. Never bury the lead.
+Template Auto-Select: Choose best fit — how-to-guide (instructional with numbered steps), thought-leadership (opinion + proof), case-study (client story with before/after numbers), or listicle (specific numbered insights with sub-proof per item).
+Content Density: Every paragraph earns its place. No filler transitions. Each paragraph = one idea, fully proven, then stop. Max 3 sentences per paragraph.
+Proof Hierarchy: Tier 1 = specific client outcome with numbers. Tier 2 = logical argument from first principles. Tier 3 = analogy. Never state something as fact without one.
+Readability: Use subheadings every 200-300 words. Bold the most important phrase in each section.
+FAQ Integration: Anticipate 3-5 questions the reader will have and answer them inline where they naturally arise — not in a separate FAQ block at the end.
+Quality Gate: Every claim has proof. Opening is the strongest possible entry point. Ending tells the reader exactly what to do next.`;
+
+  return "";
+}
+
+async function genPosts(raw, theme, fmt, mind, formats, bestPractice=[], writingRules="", skill="standard") {
   const raw2 = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}\nIf no theme/format specified, pick the best ones from the knowledge banks.\nCTA RULE: Every variation MUST end with a CTA line pointing to bgb.coach/offer. Each variation must use a DIFFERENT CTA angle so we can test which converts best. Vary the wording — examples: "Get the full framework → bgb.coach/offer" / "See exactly how we fixed this → bgb.coach/offer" / "The BGB playbook behind this → bgb.coach/offer" / "If this sounds like your business → bgb.coach/offer". Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3\n\nCTA LINE","cta":"CTA LINE"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post\n\nCTA LINE","cta":"CTA LINE"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. He helps $1M–$5M business owners install a GM and escape the founder trap.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\n${bpCtx(bestPractice)}${skillCtx(skill)?"\n"+skillCtx(skill):""}\nIf no theme/format specified, pick the best ones from the knowledge banks.\nCTA RULE: Every variation MUST end with a CTA line pointing to bgb.coach/offer. Each variation must use a DIFFERENT CTA angle so we can test which converts best. Vary the wording — examples: "Get the full framework → bgb.coach/offer" / "See exactly how we fixed this → bgb.coach/offer" / "The BGB playbook behind this → bgb.coach/offer" / "If this sounds like your business → bgb.coach/offer". Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY a single line of valid JSON. No newlines anywhere in the JSON. Use \n for line breaks in content. Format: {"chosenTheme":"theme used","chosenFormat":"format used","insights":["insight1","insight2"],"variations":[{"platform":"LinkedIn","format":"fmt","hook":"hook","content":"line1\nline2\nline3\n\nCTA LINE","cta":"CTA LINE"},{"platform":"Instagram","format":"fmt","hook":"hook","content":"short post\n\nCTA LINE","cta":"CTA LINE"}],"suggestedABTest":{"hypothesis":"hyp","variantHook":"hook","variantContent":"content"}}`,
     `Raw input:\n${raw||"Pick the most compelling BGB topic right now based on the knowledge banks."}\n\nTheme: ${theme||"auto-pick best"}\nFormat: ${fmt||"auto-pick best"}`,
     3000
   );
   return JSON.parse(raw2);
 }
 
-async function genWeekPosts(mind, formats, writingRules="") {
+async function genWeekPosts(mind, formats, writingRules="", skill="standard") {
   const raw = await callClaude(
-    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}\nCTA RULE: Every post MUST end with a CTA line pointing to bgb.coach/offer. Each of the 5 posts must use a DIFFERENT CTA angle to test which converts best — vary the wording and tone. Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks\\n\\nCTA LINE","cta":"CTA LINE","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
+    `You are a ghostwriter for Stephen at BGB Consulting. Generate 5 LinkedIn posts for this week — each on a DIFFERENT theme from Stephen's knowledge banks, each using the best-fit proven format. No two posts can share a theme or format. Maximise variety. Each post should stand alone and be ready to publish.\n${voiceCtx(mind, writingRules)}\n${fmtCtx(formats)}${skillCtx(skill)?"\n"+skillCtx(skill):""}\nCTA RULE: Every post MUST end with a CTA line pointing to bgb.coach/offer. Each of the 5 posts must use a DIFFERENT CTA angle to test which converts best — vary the wording and tone. Include the CTA as the last line of content AND as a separate "cta" field.\nReturn ONLY valid JSON: {"posts":[{"theme":"...","format":"...","hook":"...","content":"full post text using \\n for line breaks\\n\\nCTA LINE","cta":"CTA LINE","platform":"LinkedIn","rationale":"one sentence why this theme+format combo now"}]}`,
     `Generate 5 varied LinkedIn posts for the week. Cover different angles of the BGB positioning — delegation, GM install, owner freedom, founder trap, scaling. Mix proven and testing formats.`,
     4000
   );
@@ -2069,8 +2117,17 @@ Rules:
   );
 }
 
+const SKILLS = [
+  { value:"standard",  label:"Standard",          desc:"Stephen's voice + best practices (default)" },
+  { value:"linkedin",  label:"LinkedIn Strategic", desc:"Hook architecture · pillar distribution · engagement triggers" },
+  { value:"narrative", label:"Narrative Craft",    desc:"Scene entry · show don't tell · pacing · interiority" },
+  { value:"voice-dna", label:"Voice DNA",          desc:"Maximum voice fidelity · ICP targeting · power word filter" },
+  { value:"blog",      label:"Long-form / Blog",   desc:"Answer-first · proof hierarchy · FAQ integration" },
+];
+
 function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules="" }) {
   const [raw, setRaw] = useState("");
+  const [skill, setSkill] = useState("standard");
   const [loading, setLoading] = useState(false);
   const [weekLoading, setWeekLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -2079,7 +2136,7 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules
 
   const generate = async () => {
     setLoading(true); setErr(""); setResult(null);
-    try { const r = await genPosts(raw, "", "", mind, formats, [], writingRules); setResult(r); }
+    try { const r = await genPosts(raw, "", "", mind, formats, [], writingRules, skill); setResult(r); }
     catch(e) { setErr("Generation failed: " + e.message); }
     finally { setLoading(false); }
   };
@@ -2087,7 +2144,7 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules
   const fillWeek = async () => {
     setWeekLoading(true); setErr(""); setWeekDone(false);
     try {
-      const r = await genWeekPosts(mind, formats, writingRules);
+      const r = await genWeekPosts(mind, formats, writingRules, skill);
       if (r.posts) {
         r.posts.forEach(p => addToQueue({content:p.content,hook:p.hook,platform:"LinkedIn",format:p.format}, {theme:p.theme,rationale:p.rationale}));
         setWeekDone(true);
@@ -2096,6 +2153,8 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules
     } catch(e) { setErr("Fill My Week failed: " + e.message); }
     finally { setWeekLoading(false); }
   };
+
+  const activeSkill = SKILLS.find(s=>s.value===skill);
 
   return (
     <div>
@@ -2118,6 +2177,15 @@ function GeneratePage({ mind, formats, assets, addToQueue, setPage, writingRules
             {assets.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}
           </select>
         </div>}
+        <div className="fg">
+          <label className="lbl">Writing skill</label>
+          <select className="sel" value={skill} onChange={e=>setSkill(e.target.value)}>
+            {SKILLS.map(s=><option key={s.value} value={s.value}>{s.label} — {s.desc}</option>)}
+          </select>
+          {skill!=="standard"&&<div style={{marginTop:6,fontSize:11,color:"var(--ink3)",lineHeight:1.5}}>
+            <strong style={{color:"var(--gold)"}}>{activeSkill?.label}:</strong> {activeSkill?.desc}
+          </div>}
+        </div>
         <button className="btn bp w100" style={{padding:"12px 16px",fontSize:14}} onClick={generate} disabled={loading}>
           {loading?<><span className="spin"/> Writing in Stephen's voice...</>:"Generate Post →"}
         </button>
