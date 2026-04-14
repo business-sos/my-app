@@ -2177,6 +2177,7 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
   );
   const [platformSel, setPlatformSel] = useState(()=>initPlatforms(contentQueue));
   const [expanded, setExpanded] = useState(null);
+  const [copied, setCopied] = useState(null); // item id that just copied
   const [showNew, setShowNew] = useState(false);
   const [newDraft, setNewDraft] = useState({content:"",cta:"",platforms:["LinkedIn"],format:"",theme:""});
 
@@ -2249,7 +2250,11 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
       : editedContent;
     const platforms = platformSel[item.id]||[item.platform||"LinkedIn"];
     if (!platforms.length) { alert("Select at least one platform."); return; }
-    platforms.forEach(plat => postFromQueue({...item, platform: plat, cta: editedCta}, merged));
+    platforms.forEach((plat, i) => postFromQueue(
+      {...item, platform: plat, cta: editedCta},
+      merged,
+      i === 0 ? (ok) => { if(ok){ setCopied(item.id); setTimeout(()=>setCopied(null),2500); } } : null
+    ));
   };
 
   const NewPostForm = () => (
@@ -2356,7 +2361,7 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
                     <td className="xs muted">{new Date(item.addedAt).toLocaleDateString("en-AU",{day:"numeric",month:"short"})}</td>
                     <td onClick={e=>e.stopPropagation()}>
                       <div className="f g6" style={{justifyContent:"flex-end"}}>
-                        <button className="btn bg bsm" onClick={()=>goLive(item)}>Go Live →</button>
+                        <button className="btn bsm" style={{background: copied===item.id?"var(--sage)":"var(--gold)",color:"#fff"}} onClick={()=>goLive(item)}>{copied===item.id?"✓ Copied!":"Go Live →"}</button>
                         <button className="btn bgh bsm" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>✕</button>
                       </div>
                     </td>
@@ -2402,7 +2407,7 @@ function ContentQueuePage({ contentQueue, setContentQueue, postFromQueue }) {
                         </div>
                         <div className="f g8">
                           <button className="btn bp" onClick={()=>saveEdits(item)}>Save edits ↑</button>
-                          <button className="btn bg" onClick={()=>goLive(item)}>Go Live →</button>
+                          <button className="btn" style={{background: copied===item.id?"var(--sage)":"var(--gold)",color:"#fff"}} onClick={()=>goLive(item)}>{copied===item.id?"✓ Copied!":"Go Live →"}</button>
                           <button className="btn bgh bsm mla" style={{color:"var(--rust)"}} onClick={()=>setContentQueue(q=>q.filter(qi=>qi.id!==item.id))}>Remove</button>
                         </div>
                       </td>
@@ -2589,13 +2594,22 @@ export default function App() {
     }]);
   };
 
-  const postFromQueue = (item, editedText) => {
+  const postFromQueue = (item, editedText, onCopied) => {
     const postId = Date.now();
     const trackedLink = `bgb.coach/offer?ref=${postId}`;
     const baseText = (editedText !== undefined ? editedText : item.content) || item.content;
-    // Inject ?ref into any bare bgb.coach/offer links in the content
-    const finalContent = baseText.replace(/bgb\.coach\/offer(?!\?ref=)/g, trackedLink);
-    navigator.clipboard.writeText(finalContent).catch(()=>{});
+    // Replace any bare bgb.coach/offer links, then append if still not present
+    let finalContent = baseText.replace(/bgb\.coach\/offer(?!\?ref=)/g, trackedLink);
+    if (!finalContent.includes(trackedLink)) {
+      finalContent = finalContent.trimEnd() + '\n\n' + trackedLink;
+    }
+    navigator.clipboard.writeText(finalContent)
+      .then(()=>{ if(onCopied) onCopied(true); })
+      .catch(()=>{
+        // Fallback: prompt so user can copy manually
+        window.prompt("Clipboard blocked — copy manually:", finalContent);
+        if(onCopied) onCopied(true);
+      });
     const newPost = {
       id: postId,
       title: item.hook?.slice(0,60)||finalContent.split('\n')[0].slice(0,60),
