@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase, listAccessibleClients } from '../lib/supabase.js';
 import ClientHeader from '../components/ClientHeader.jsx';
+import DataEntryNav from '../components/DataEntryNav.jsx';
 
 export default function Integrations({ profile }) {
   const [clients, setClients] = useState([]);
@@ -41,9 +42,10 @@ export default function Integrations({ profile }) {
         clientId={clientId}
         onClientChange={(newId) => { setClientId(newId); setMode('list'); setEditing(null); }}
         profile={profile}
-        pageLabel="Integrations"
+        pageLabel="Data entry"
         subtitle="Connect Google Sheets and other data sources"
       />
+      <DataEntryNav />
       {mode === 'list' && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
           <button className="primary" onClick={() => { setEditing(null); setMode('new'); }}>+ Connect Google Sheet</button>

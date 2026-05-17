@@ -126,7 +126,7 @@ export async function listIndicatorsForClient(clientId) {
 export async function listTrackedIndicators(clientId) {
   const { data, error } = await supabase
     .from('tracked_indicators')
-    .select('id, target_value, indicator:indicators(id, name, unit, direction, target_cadence, area_id)')
+    .select('id, target_value, indicator:indicators(id, name, slug, unit, direction, target_cadence, area_id, is_standard, is_input_only, formula)')
     .eq('client_id', clientId);
   if (error) throw error;
   return data;

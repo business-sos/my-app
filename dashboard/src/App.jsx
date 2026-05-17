@@ -6,9 +6,11 @@ import Signup from './pages/Signup.jsx';
 import ClientDashboard from './pages/ClientDashboard.jsx';
 import CoachOverview from './pages/CoachOverview.jsx';
 import MetricEntry from './pages/MetricEntry.jsx';
+import MetricDetail from './pages/MetricDetail.jsx';
 import Indicators from './pages/Indicators.jsx';
 import Integrations from './pages/Integrations.jsx';
 import FinancialAnalysis from './pages/FinancialAnalysis.jsx';
+import RawData from './pages/RawData.jsx';
 import TilesPreview from './pages/TilesPreview.jsx';
 import TopBar from './components/TopBar.jsx';
 
@@ -112,10 +114,7 @@ function Shell({ profile }) {
       <nav className="sidebar">
         <h1><span className="brand-diamond" /> Business Health</h1>
         <NavLink to="/" end>{isCoach ? 'Clients' : 'Dashboard'}</NavLink>
-        <NavLink to="/entry">Enter metrics</NavLink>
-        <NavLink to="/indicators">Indicators</NavLink>
-        <NavLink to="/financial">Financial analysis</NavLink>
-        <NavLink to="/integrations">Integrations</NavLink>
+        <NavLink to="/entry">Data entry</NavLink>
       </nav>
       <main className="main-with-topbar">
         <TopBar profile={profile} />
@@ -123,11 +122,14 @@ function Shell({ profile }) {
           <Routes>
             <Route path="/" element={isCoach ? <CoachOverview /> : <ClientDashboard profile={profile} />} />
             <Route path="/client/:clientId" element={<ClientDashboard profile={profile} />} />
+            <Route path="/client/:clientId/metric/:indicatorId" element={<MetricDetail profile={profile} />} />
             <Route path="/entry" element={<MetricEntry profile={profile} />} />
             <Route path="/indicators" element={<Indicators profile={profile} />} />
             <Route path="/integrations" element={<Integrations profile={profile} />} />
             <Route path="/financial" element={<FinancialAnalysis profile={profile} />} />
             <Route path="/financial/:clientId" element={<FinancialAnalysis profile={profile} />} />
+            <Route path="/raw" element={<RawData profile={profile} />} />
+            <Route path="/raw/:clientId" element={<RawData profile={profile} />} />
             <Route path="/tiles-preview" element={<TilesPreview />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -10,17 +10,24 @@ const UNIT_MAP = {
   score: 'ratio',
 };
 
+function monthLabel(periodStart) {
+  if (!periodStart) return undefined;
+  const [y, m] = String(periodStart).split('-').map(Number);
+  if (!y || !m) return undefined;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-AU', { month: 'short', year: 'numeric' });
+}
+
 /**
- * @param {{ id: string, target_value?: number|null, indicator: { id: string, name: string, unit?: string, direction?: string, target_cadence?: string } }} tracked
+ * @param {{ id: string, target_value?: number|null, indicator: { id: string, name: string, unit?: string, direction?: string, target_cadence?: string, formula?: object|null } }} tracked
  * @param {Array<{ indicator_id: string, value: number|string, period_start: string }>} measurements
  * @returns {import('./types.js').Metric}
  */
 export function fromTrackedIndicator(tracked, measurements) {
   const ind = tracked.indicator;
-  const series = (measurements ?? [])
+  const ordered = (measurements ?? [])
     .filter(m => m.indicator_id === ind.id)
-    .sort((a, b) => a.period_start.localeCompare(b.period_start))
-    .map(m => Number(m.value));
+    .sort((a, b) => a.period_start.localeCompare(b.period_start));
+  const series = ordered.map(m => Number(m.value));
 
   const unit = UNIT_MAP[ind.unit] ?? 'ratio';
 
@@ -35,6 +42,20 @@ export function fromTrackedIndicator(tracked, measurements) {
   if (series.length >= 2) metric.history = series;
   if (tracked.target_value != null) {
     metric.target = { value: Number(tracked.target_value) };
+  }
+  // Period-over-period comparison: pass previous value + month labels so the
+  // tile can render a traffic-light delta. The resolver will pick
+  // period-comparison only when there's no target, no range, no statusRules, no
+  // history >= 4. With history present, sparkline-trend still wins, but the
+  // sparkline pattern reads metric.comparison for its delta line.
+  if (ordered.length >= 2) {
+    const cur = ordered.at(-1);
+    const prev = ordered.at(-2);
+    metric.comparison = {
+      previous: Number(prev.value),
+      previousLabel: monthLabel(prev.period_start) ?? 'previous',
+      currentLabel: monthLabel(cur.period_start) ?? 'current',
+    };
   }
   return metric;
 }

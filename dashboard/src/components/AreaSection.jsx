@@ -1,50 +1,56 @@
-// Per-area section: top border tinted by RAG status, eyebrow + italic question title,
-// active alerts, then a grid of Tiles (one per tracked indicator), then the LLM
-// recommendation panel. Replaces the old AreaCard + IndicatorTile combo.
+// One column on the 4-column Dashboard grid. Renders the area's question + a
+// vertical stack of <Tile> per tracked indicator. In Setup mode, each tile gets
+// inline target-edit + remove controls.
 
-import { useState } from 'react';
-import AlertBanner from './AlertBanner.jsx';
-import RecommendationPanel from './RecommendationPanel.jsx';
+import { Link } from 'react-router-dom';
 import { Tile } from './tiles/index.js';
 import { fromTrackedIndicator } from './tiles/adapter.js';
+import TileSetupControls from './TileSetupControls.jsx';
 
-export default function AreaSection({ area, clientId, tracked, measurements, alerts, health }) {
-  const [expanded, setExpanded] = useState(false);
-  const pill = health?.status ?? 'green';
-  const accent = pill === 'red' ? 'var(--bad)' : pill === 'amber' ? 'var(--warn)' : 'var(--teal)';
-
-  const shown = tracked.slice(0, expanded ? tracked.length : 2);
+/**
+ * @param {{
+ *   area: { id: string, title: string, short_label: string },
+ *   clientId: string,
+ *   tracked: Array<any>,
+ *   measurements: Array<any>,
+ *   mode: 'manage' | 'setup',
+ *   onChanged?: () => void
+ * }} props
+ */
+export default function AreaSection({ area, clientId, tracked, measurements, mode = 'manage', onChanged }) {
+  // Hide base inputs (is_input_only) from the Dashboard tile grid per spec.
+  const visible = (tracked ?? []).filter(t => !t.indicator?.is_input_only);
 
   return (
-    <section className="card" style={{ borderTop: `3px solid ${accent}` }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>{area.short_label}</div>
-          <h3 style={{ margin: '0 0 4px', fontFamily: 'Cormorant Garamond, serif', fontStyle: 'italic', fontSize: 20, fontWeight: 500 }}>
-            {area.title}
-          </h3>
-        </div>
-        <span className={`pill ${pill}`}>{pill}</span>
-      </div>
+    <section className="dash-col">
+      <header className="dash-col-head">
+        <div className="eyebrow">{area.short_label}</div>
+        <h3>{area.title}</h3>
+      </header>
 
-      {alerts.slice(0, 3).map((a, i) => (
-        <AlertBanner key={a.id ?? `live-${i}`} alert={a} />
-      ))}
-
-      <div className="tile-grid" style={{ marginTop: 10, gridTemplateColumns: '1fr' }}>
-        {shown.map(t => (
-          <Tile key={t.id} metric={fromTrackedIndicator(t, measurements)} />
-        ))}
-        {!tracked.length && <div className="muted">No indicators tracked in this area.</div>}
-      </div>
-
-      {tracked.length > 2 && (
-        <button onClick={() => setExpanded(e => !e)} style={{ marginTop: 8, marginBottom: 8 }}>
-          {expanded ? 'Collapse' : `Show all ${tracked.length}`}
-        </button>
+      {visible.length === 0 && (
+        <div className="muted" style={{ fontSize: 12 }}>No tracked indicators in this area yet.</div>
       )}
 
-      <RecommendationPanel clientId={clientId} area={area} />
+      {visible.map(t => {
+        const metric = fromTrackedIndicator(t, measurements);
+        const tile = (
+          <Tile metric={metric} />
+        );
+        if (mode === 'setup') {
+          return (
+            <div key={t.id}>
+              {tile}
+              <TileSetupControls tracked={t} onChanged={onChanged} />
+            </div>
+          );
+        }
+        return (
+          <Link key={t.id} to={`/client/${clientId}/metric/${t.indicator.id}`} className="tile-link" aria-label={`Open ${t.indicator.name}`}>
+            {tile}
+          </Link>
+        );
+      })}
     </section>
   );
 }

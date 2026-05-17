@@ -5,6 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { computeRatios, detectConcerns, RATIO_CATALOG, formatRatio } from '../src/lib/financial.js';
+import { deriveAfterWrite } from './_derive.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -55,54 +56,88 @@ export default async function handler(req, res) {
   ratios._net_income = pl.net_income ?? null;
   ratios._cash = lineItems.balance_sheet?.cash ?? null;
 
-  // --- Customer Acquisition Cost ---
-  // CAC = sales_marketing_expense for this period ÷ new customers measurement for the same period.
-  // We persist this as a measurement under the master "Cost per acquisition" indicator so it
-  // appears on the client dashboard sparkline + feeds into the rules engine.
-  let cacComputed = null;
-  if (pl.sales_marketing_expense != null) {
-    const periodStart = snap.period_month;
-    // Look up master indicators by name. These IDs are stable because the seed creates them once.
-    const { data: cacInds } = await supabase
+  // --- Base-input measurements from the P&L ---
+  // Push the P&L's raw numbers into the corresponding base-input indicators
+  // (revenue, cogs, marketing_spend, wages, net_profit). The derivation runner
+  // then auto-computes any derived metric that depends on them (CAC, gross
+  // margin %, net margin %, wages % of sales, profit per employee, etc.).
+  const periodStart = snap.period_month;
+  const [py, pm] = periodStart.split('-').map(Number);
+  const periodEnd = new Date(Date.UTC(py, pm, 0)).toISOString().slice(0, 10);
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const SLUG_FROM_PL = {
+    revenue: pl.revenue,
+    cogs: pl.cogs,
+    marketing_spend: pl.sales_marketing_expense,
+    wages: pl.salaries_wages ?? pl.wages,
+    net_profit: pl.net_income,
+  };
+  const baseInputRows = Object.entries(SLUG_FROM_PL)
+    .filter(([_slug, v]) => v != null && Number.isFinite(Number(v)));
+
+  let derivationStats = { computed: 0 };
+  if (baseInputRows.length > 0) {
+    const { data: inds } = await supabase
       .from('indicators')
-      .select('id, name')
+      .select('id, slug')
       .is('client_id', null)
-      .in('name', ['New customers', 'Cost per acquisition']);
-    const newCustomersIndId = cacInds?.find(i => i.name === 'New customers')?.id;
-    const cacIndId = cacInds?.find(i => i.name === 'Cost per acquisition')?.id;
-    if (newCustomersIndId && cacIndId) {
-      const { data: nc } = await supabase
+      .in('slug', baseInputRows.map(([s]) => s));
+    const idBySlug = new Map((inds ?? []).map(i => [i.slug, i.id]));
+
+    const writes = [];
+    for (const [slug, raw] of baseInputRows) {
+      const indId = idBySlug.get(slug);
+      if (!indId) continue;
+      writes.push({
+        client_id: snap.client_id,
+        indicator_id: indId,
+        value: Number(raw),
+        period_start: periodStart,
+        period_end: periodEnd,
+        source: 'api',
+        source_ref: `pl:snapshot=${snapshot_id}`,
+        notes: `Auto-pushed from P&L (${slug})`,
+        entered_by: user?.id,
+      });
+    }
+    if (writes.length > 0) {
+      // Make sure each base-input indicator is tracked (so it's visible in
+      // Data Entry → Inputs and pickable in the Raw data view).
+      await supabase
+        .from('tracked_indicators')
+        .upsert(
+          writes.map(w => ({ client_id: w.client_id, indicator_id: w.indicator_id })),
+          { onConflict: 'client_id,indicator_id' }
+        );
+      await supabase
+        .from('measurements')
+        .upsert(writes, { onConflict: 'client_id,indicator_id,period_start' });
+
+      derivationStats = await deriveAfterWrite({
+        supabase,
+        rows: writes.map(w => ({ client_id: w.client_id, indicator_id: w.indicator_id, period_start: w.period_start })),
+        userId: user?.id,
+      });
+    }
+  }
+  // Surface the derived CAC into the ratios snapshot so the narrative can reference it.
+  if (derivationStats.computed > 0) {
+    const { data: cacRow } = await supabase
+      .from('indicators')
+      .select('id')
+      .is('client_id', null)
+      .eq('slug', 'cac')
+      .maybeSingle();
+    if (cacRow?.id) {
+      const { data: cacMeas } = await supabase
         .from('measurements')
         .select('value')
         .eq('client_id', snap.client_id)
-        .eq('indicator_id', newCustomersIndId)
+        .eq('indicator_id', cacRow.id)
         .eq('period_start', periodStart)
         .maybeSingle();
-      const newCustomers = nc?.value != null ? Number(nc.value) : null;
-      if (newCustomers && newCustomers > 0) {
-        const cac = Number(pl.sales_marketing_expense) / newCustomers;
-        cacComputed = { value: cac, marketing: pl.sales_marketing_expense, new_customers: newCustomers };
-        // Make sure the indicator is tracked, then upsert the measurement
-        await supabase
-          .from('tracked_indicators')
-          .upsert({ client_id: snap.client_id, indicator_id: cacIndId }, { onConflict: 'client_id,indicator_id' });
-        // Period end = last day of the month
-        const [py, pm] = periodStart.split('-').map(Number);
-        const periodEnd = new Date(Date.UTC(py, pm, 0)).toISOString().slice(0, 10);
-        const { data: { user } } = await supabase.auth.getUser();
-        await supabase.from('measurements').upsert({
-          client_id: snap.client_id,
-          indicator_id: cacIndId,
-          value: cac,
-          period_start: periodStart,
-          period_end: periodEnd,
-          source: 'api',
-          source_ref: `derived:cac:snapshot=${snapshot_id}`,
-          notes: `${pl.sales_marketing_expense.toLocaleString()} S&M ÷ ${newCustomers} new customers`,
-          entered_by: user?.id,
-        }, { onConflict: 'client_id,indicator_id,period_start' });
-        ratios.cac = cac;
-      }
+      if (cacMeas?.value != null) ratios.cac = Number(cacMeas.value);
     }
   }
 

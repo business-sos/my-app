@@ -6,6 +6,7 @@ import {
   supabase,
 } from '../lib/supabase.js';
 import ClientHeader from '../components/ClientHeader.jsx';
+import DataEntryNav from '../components/DataEntryNav.jsx';
 
 // All period calculations operate in UTC to avoid off-by-one errors around timezone edges.
 // Dates are stored and compared as plain YYYY-MM-DD strings.
@@ -124,6 +125,8 @@ export default function MetricEntry({ profile }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       let saved = 0;
+      const periodsTouched = new Set();
+      const slugsTouched = new Set();
       for (const t of tracked) {
         const raw = values[t.indicator.id];
         if (raw === '' || raw == null) continue;
@@ -141,6 +144,23 @@ export default function MetricEntry({ profile }) {
           entered_by: user?.id,
         });
         saved++;
+        periodsTouched.add(period_start);
+        if (t.indicator.slug) slugsTouched.add(t.indicator.slug);
+      }
+      // Trigger derivation for any standard metric that depends on what just changed.
+      if (saved > 0 && periodsTouched.size > 0 && slugsTouched.size > 0) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          await fetch('/api/derive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+            body: JSON.stringify({
+              client_id: clientId,
+              periods: [...periodsTouched],
+              changed_slugs: [...slugsTouched],
+            }),
+          });
+        } catch (e) { /* derivation is best-effort; don't fail the save */ }
       }
       setStatus({ type: 'ok', msg: `Saved ${saved} ${saved === 1 ? 'measurement' : 'measurements'}.` });
     } catch (err) {
@@ -152,7 +172,7 @@ export default function MetricEntry({ profile }) {
 
   if (!clientId) return <div>Loading…</div>;
   if (!tracked.length)
-    return <div className="card">No indicators tracked yet. Pick some on the <strong>Indicators</strong> page.</div>;
+    return <div className="card">No indicators tracked yet. Switch to <strong>Setup</strong> mode on the Dashboard to add some.</div>;
 
   return (
     <div>
@@ -161,9 +181,10 @@ export default function MetricEntry({ profile }) {
         clientId={clientId}
         onClientChange={setClientId}
         profile={profile}
-        pageLabel="Enter metrics"
+        pageLabel="Data entry"
         subtitle="Manual data entry"
       />
+      <DataEntryNav />
       <p className="muted" style={{ marginTop: -8, marginBottom: 16 }}>
         Pick the period for each indicator — the current period defaults. You can backdate or update earlier periods at any time.
       </p>

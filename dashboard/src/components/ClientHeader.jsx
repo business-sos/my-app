@@ -16,6 +16,7 @@ import { Link } from 'react-router-dom';
  */
 export default function ClientHeader({
   clients = [], clientId, onClientChange, profile, pageLabel, subtitle, backTo = '/',
+  right = null,
 }) {
   const isCoach = profile?.role === 'coach';
   const current = clients.find(c => c.id === clientId);
@@ -51,15 +52,18 @@ export default function ClientHeader({
           </div>
         )}
       </div>
-      {isCoach && clients.length > 1 && onClientChange && (
-        <select
-          value={clientId ?? ''}
-          onChange={e => onClientChange(e.target.value)}
-          style={{ minWidth: 200 }}
-        >
-          {clients.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-        </select>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {isCoach && clients.length > 1 && onClientChange && (
+          <select
+            value={clientId ?? ''}
+            onChange={e => onClientChange(e.target.value)}
+            style={{ minWidth: 200 }}
+          >
+            {clients.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+          </select>
+        )}
+        {right}
+      </div>
     </div>
   );
 }
