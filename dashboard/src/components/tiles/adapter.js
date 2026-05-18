@@ -36,7 +36,9 @@ export function fromTrackedIndicator(tracked, measurements) {
     id: ind.id,
     label: ind.name,
     unit,
-    value: series.at(-1) ?? 0,
+    // Null when no measurements exist — formatValue renders "—". This
+    // distinguishes "no data yet" from "the measured value is 0".
+    value: series.length > 0 ? series.at(-1) : null,
   };
   if (unit === 'currency') metric.currency = 'AUD';
   if (series.length >= 2) metric.history = series;
