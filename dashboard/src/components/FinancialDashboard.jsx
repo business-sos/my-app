@@ -25,25 +25,28 @@ export default function FinancialDashboard({
   const [runningId, setRunningId] = useState(null);
   const [error, setError] = useState(null);
 
+  async function loadSnapshots() {
+    if (!clientId) return;
+    const { data, error } = await supabase
+      .from('financial_snapshots')
+      .select('id, period_month, reports_included, status, confirmed_at, financial_analyses(id, created_at)')
+      .eq('client_id', clientId)
+      .order('period_month', { ascending: false });
+    if (error) setError(error.message);
+    const withMeta = (data ?? []).map(r => ({
+      ...r,
+      analysis_count: r.financial_analyses?.length ?? 0,
+      last_analyzed_at: latestTime(r.financial_analyses),
+    }));
+    setRows(withMeta);
+    setLoading(false);
+  }
+
   useEffect(() => {
     if (!clientId) return;
     setLoading(true);
-    (async () => {
-      // Pull snapshots + aggregate info about any analyses
-      const { data, error } = await supabase
-        .from('financial_snapshots')
-        .select('id, period_month, reports_included, status, confirmed_at, financial_analyses(id, created_at)')
-        .eq('client_id', clientId)
-        .order('period_month', { ascending: false });
-      if (error) setError(error.message);
-      const withMeta = (data ?? []).map(r => ({
-        ...r,
-        analysis_count: r.financial_analyses?.length ?? 0,
-        last_analyzed_at: latestTime(r.financial_analyses),
-      }));
-      setRows(withMeta);
-      setLoading(false);
-    })();
+    loadSnapshots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, refreshKey]);
 
   async function handleRunAnalysis(snapshot) {
@@ -99,6 +102,7 @@ export default function FinancialDashboard({
               onReviewValues={() => onReviewValues(s)}
               onRunAnalysis={() => handleRunAnalysis(s)}
               onViewReport={() => onViewReport(s)}
+              onDeleted={loadSnapshots}
             />
           ))}
         </div>
@@ -107,7 +111,21 @@ export default function FinancialDashboard({
   );
 }
 
-function SnapshotCard({ snapshot, runningId, onUploadMore, onReviewValues, onRunAnalysis, onViewReport }) {
+async function deleteSnapshot(id) {
+  const { error } = await supabase.from('financial_snapshots').delete().eq('id', id);
+  if (error) throw error;
+}
+
+function SnapshotCard({ snapshot, runningId, onUploadMore, onReviewValues, onRunAnalysis, onViewReport, onDeleted }) {
+  const handleDelete = async () => {
+    if (!confirm(`Delete the ${formatPeriod(snapshot.period_month)} snapshot? This removes all uploaded reports, extractions, and analyses for that period.`)) return;
+    try {
+      await deleteSnapshot(snapshot.id);
+      onDeleted?.();
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    }
+  };
   const included = snapshot.reports_included ?? [];
   const isDraft = snapshot.status === 'draft';
   const hasAnalysis = snapshot.analysis_count > 0;
@@ -162,6 +180,7 @@ function SnapshotCard({ snapshot, runningId, onUploadMore, onReviewValues, onRun
         {hasAnalysis && (
           <button className="primary" onClick={onViewReport}>View report</button>
         )}
+        <button onClick={handleDelete} style={{ color: 'var(--bad)', marginLeft: 'auto' }} title="Delete snapshot">Delete</button>
       </div>
     </div>
   );

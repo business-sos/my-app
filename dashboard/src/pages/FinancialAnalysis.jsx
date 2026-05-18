@@ -6,6 +6,7 @@ import FinancialUploadForm from '../components/FinancialUploadForm.jsx';
 import FinancialConfirmExtraction from '../components/FinancialConfirmExtraction.jsx';
 import FinancialReport from '../components/FinancialReport.jsx';
 import ClientHeader from '../components/ClientHeader.jsx';
+import DataEntryNav from '../components/DataEntryNav.jsx';
 
 /**
  * State machine:
@@ -51,9 +52,10 @@ export default function FinancialAnalysis({ profile }) {
         clientId={clientId}
         onClientChange={(newId) => { setClientId(newId); goDashboard(); }}
         profile={profile}
-        pageLabel="Financial analysis"
+        pageLabel="Data entry"
         subtitle="P&L · Balance sheet · Cashflow"
       />
+      <DataEntryNav />
 
 
       {mode === 'dashboard' && (
