@@ -420,6 +420,16 @@ tbody tr:hover { background: var(--paper-alt); }
   min-height: 18px;
 }
 .tile-label { color: var(--ink-soft); }
+.tile-empty {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-style: italic;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+}
 .tile-value {
   font-family: 'Cormorant Garamond', serif;
   font-size: 28px;
