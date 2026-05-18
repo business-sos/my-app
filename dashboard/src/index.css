@@ -281,7 +281,61 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 @media (max-width: 1100px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px)  { .grid-4 { grid-template-columns: 1fr; } }
 
-/* Dashboard column (one per area question) */
+/* Dashboard area section: a single quiet panel per area question,
+   with a header strip and a vertical list of metric rows.
+   No individual tile borders — the section holds the chrome. */
+.area-section {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 14px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.area-section-head { padding: 4px 4px 12px; margin-bottom: 6px; border-bottom: 1px solid var(--border-soft); }
+.area-section-head .eyebrow { color: var(--ink-soft); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+.area-section-head h3 {
+  margin: 4px 0 0; font-family: 'Cormorant Garamond', serif; font-style: italic;
+  font-size: 18px; font-weight: 500; color: var(--ink); line-height: 1.25;
+}
+.area-list { display: flex; flex-direction: column; }
+.area-list > * + * { border-top: 1px solid var(--border-soft); }
+.area-section-toggle {
+  margin-top: 6px; padding: 8px 4px; background: transparent; border: none;
+  color: var(--ink-soft); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  text-align: left; cursor: pointer; width: 100%;
+}
+.area-section-toggle:hover { color: var(--ink); background: var(--paper-alt); border-radius: 4px; }
+.area-section-empty { padding: 6px 4px 12px; font-size: 12px; }
+
+/* Hero strip: top 3 highest-impact KPIs above the section grid */
+.hero-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+@media (max-width: 900px) { .hero-strip { grid-template-columns: 1fr; } }
+.hero-card {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 20px 22px;
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  text-decoration: none; color: inherit;
+  transition: border-color 120ms ease, transform 80ms ease;
+}
+.hero-card:hover { border-color: var(--border); transform: translateY(-1px); text-decoration: none; }
+.hero-card .eyebrow { color: var(--ink-soft); font-size: 10px; letter-spacing: 0.12em; }
+.hero-card .hero-value {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 40px; font-weight: 500; line-height: 1.05; color: var(--ink);
+  letter-spacing: -0.01em; margin-top: 2px;
+}
+.hero-card .hero-meta { font-size: 12px; color: var(--ink-soft); display: flex; gap: 10px; align-items: baseline; }
+.hero-card .hero-delta { font-size: 13px; font-weight: 500; }
+.hero-card .hero-delta.up { color: var(--good); }
+.hero-card .hero-delta.down { color: var(--bad); }
+.hero-card .hero-delta.flat { color: var(--ink-soft); }
+
+/* Legacy dash-col aliases — kept so anything that still imports the old class
+   doesn't break. Should be removed once nothing references them. */
 .dash-col { display: flex; flex-direction: column; gap: 12px; }
 .dash-col-head { padding: 6px 2px 10px; border-bottom: 1px solid var(--border-soft); margin-bottom: 4px; }
 .dash-col-head .eyebrow { color: var(--ink-soft); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -413,40 +467,42 @@ tbody tr:hover { background: var(--paper-alt); }
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 14px;
 }
+/* Tile is a list row inside an .area-list — no individual border, no card chrome.
+   The parent section + dividers carry the structure. */
 .tile {
-  background: var(--paper);
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 12px 4px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  transition: border-color 120ms ease;
+  gap: 6px;
+  transition: background 120ms ease;
 }
-.tile:hover { border-color: var(--border); }
+.tile-link:hover .tile { background: var(--paper-alt); border-radius: 6px; }
+.tile-link:hover { transform: none; }
 .tile-head {
   display: flex; justify-content: space-between; align-items: center;
   gap: 8px;
-  min-height: 18px;
+  min-height: 16px;
 }
 .tile-label { color: var(--ink-soft); }
 .tile-empty {
-  margin-top: 2px;
   font-size: 12px;
   color: var(--ink-soft);
   font-style: italic;
   font-family: 'Cormorant Garamond', serif;
-  font-size: 14px;
   letter-spacing: 0.02em;
   opacity: 0.7;
+  padding: 2px 0;
 }
 .tile-value {
   font-family: 'Cormorant Garamond', serif;
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 500;
   color: var(--ink);
   line-height: 1;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.01em;
 }
 .tile-value-row {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;

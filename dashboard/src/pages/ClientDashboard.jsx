@@ -8,6 +8,7 @@ import {
 } from '../lib/supabase.js';
 import AreaSection from '../components/AreaSection.jsx';
 import ClientHeader from '../components/ClientHeader.jsx';
+import HeroStrip from '../components/HeroStrip.jsx';
 import InsightsPanel from '../components/InsightsPanel.jsx';
 
 // 4-column Dashboard per the Dashboard.docx spec:
@@ -91,6 +92,10 @@ export default function ClientDashboard({ profile }) {
           </div>
         }
       />
+
+      {mode === 'manage' && (
+        <HeroStrip clientId={clientId} tracked={tracked} measurements={measurements} />
+      )}
 
       <div className="grid-4" style={{ marginBottom: 24 }}>
         {ordered.map(area => (
