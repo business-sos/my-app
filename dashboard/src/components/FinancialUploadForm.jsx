@@ -36,50 +36,104 @@ export default function FinancialUploadForm({ clientId, existingSnapshot, onUplo
   const [periodMonth, setPeriodMonth] = useState(existingSnapshot?.period_month ?? lastMonthFirst());
   const [files, setFiles] = useState({ profit_loss: null, balance_sheet: null, cashflow: null });
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const locked = Boolean(existingSnapshot);
+
+  /**
+   * For one (file, reportType), call extract → get back periods array,
+   * then for each period create/find a snapshot, attach the file, write line items.
+   * Returns the list of snapshot_ids touched.
+   */
+  async function processFile(reportType, file, jwt) {
+    setStatus(`Extracting ${REPORT_LABELS[reportType]}…`);
+    const text = await fileToText(file);
+
+    // Step 1: extract (no snapshot yet — Claude tells us how many periods are in the file)
+    const exRes = await fetch('/api/financial-extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({
+        client_id: clientId,
+        report_type: reportType,
+        text,
+        period_hint: periodMonth,
+      }),
+    });
+    if (!exRes.ok) throw new Error(`extract failed: ${(await exRes.json()).error}`);
+    const exBody = await exRes.json();
+    const periods = exBody.periods ?? [];
+    if (periods.length === 0) throw new Error('extract returned no periods');
+
+    setStatus(
+      periods.length === 1
+        ? `Saving ${REPORT_LABELS[reportType]} for ${formatPeriodLabel(periods[0].period_month)}…`
+        : `Saving ${periods.length} months of ${REPORT_LABELS[reportType]}…`
+    );
+
+    // Step 2: per period, create/find snapshot + upload file + write line items
+    const touchedSnapshotIds = [];
+    for (const period of periods) {
+      // Get signed upload URL (also creates/upserts the snapshot row).
+      const urlRes = await fetch('/api/financial-upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ client_id: clientId, period_month: period.period_month, report_type: reportType }),
+      });
+      if (!urlRes.ok) throw new Error(`upload-url failed: ${(await urlRes.json()).error}`);
+      const { snapshot_id, upload, path } = await urlRes.json();
+
+      // Upload the same file under each snapshot's path. The file is identical
+      // across periods (it's a multi-period report); we just want every snapshot
+      // to have its source attached for audit.
+      const { error: upErr } = await supabase.storage
+        .from('financial-uploads')
+        .uploadToSignedUrl(path, upload.token, file, { upsert: true });
+      if (upErr) throw new Error(`storage upload failed: ${upErr.message}`);
+
+      // Write line items directly (Supabase client respects RLS).
+      const { error: liErr } = await supabase
+        .from('financial_line_items')
+        .upsert({
+          snapshot_id,
+          report_type: reportType,
+          data: period.data,
+          extraction_model: exBody.extraction_model ?? 'claude-sonnet-4-6',
+        }, { onConflict: 'snapshot_id,report_type' });
+      if (liErr) throw new Error(`line-items insert failed: ${liErr.message}`);
+
+      touchedSnapshotIds.push(snapshot_id);
+    }
+    return touchedSnapshotIds;
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setStatus(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const jwt = session?.access_token;
       if (!jwt) throw new Error('Not signed in');
 
-      const uploaded = [];
+      let firstSnapshotId = null;
+      let totalSnapshots = new Set();
+
       for (const [reportType, file] of Object.entries(files)) {
         if (!file) continue;
-        // 1. Get signed upload URL + snapshot row
-        const urlRes = await fetch('/api/financial-upload-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-          body: JSON.stringify({ client_id: clientId, period_month: periodMonth, report_type: reportType }),
-        });
-        if (!urlRes.ok) throw new Error(`upload-url failed: ${(await urlRes.json()).error}`);
-        const { snapshot_id, upload, path } = await urlRes.json();
-
-        // 2. Upload to Storage via the signed URL
-        const { error: upErr } = await supabase.storage
-          .from('financial-uploads')
-          .uploadToSignedUrl(path, upload.token, file, { upsert: true });
-        if (upErr) throw new Error(`storage upload failed: ${upErr.message}`);
-
-        // 3. Extract via LLM
-        const text = await fileToText(file);
-        const exRes = await fetch('/api/financial-extract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-          body: JSON.stringify({ snapshot_id, report_type: reportType, text }),
-        });
-        if (!exRes.ok) throw new Error(`extract failed: ${(await exRes.json()).error}`);
-        const { data } = await exRes.json();
-        uploaded.push({ snapshot_id, report_type: reportType, data });
+        const ids = await processFile(reportType, file, jwt);
+        if (ids[0] && !firstSnapshotId) firstSnapshotId = ids[0];
+        ids.forEach(id => totalSnapshots.add(id));
       }
 
-      if (!uploaded.length) throw new Error('Select at least one file');
-      onUploaded({ snapshot_id: uploaded[0].snapshot_id });
+      if (!firstSnapshotId) throw new Error('Select at least one file');
+
+      setStatus(`Saved ${totalSnapshots.size} month${totalSnapshots.size === 1 ? '' : 's'}.`);
+      onUploaded({
+        snapshot_id: firstSnapshotId,
+        snapshot_ids: [...totalSnapshots],
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -90,14 +144,16 @@ export default function FinancialUploadForm({ clientId, existingSnapshot, onUplo
   return (
     <form className="card" onSubmit={handleSubmit}>
       <h3 style={{ marginTop: 0 }}>
-        {locked ? `Add more reports to ${formatPeriodLabel(periodMonth)}` : 'Upload monthly financials'}
+        {locked ? `Add more reports to ${formatPeriodLabel(periodMonth)}` : 'Upload financials'}
       </h3>
       <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-        Accepts CSV or Excel exports from your accounting software. Monthly reports only — the numbers should cover a single calendar month.
+        Accepts CSV or Excel exports from your accounting software. <strong>Multi-period files (e.g. 12 months in 12 columns) are auto-detected</strong> and split into one snapshot per month.
       </p>
 
       <div style={{ marginBottom: 12 }}>
-        <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Period</label>
+        <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>
+          Period {locked ? '' : <span className="muted" style={{ fontWeight: 400 }}>(used as a hint when the file is single-period)</span>}
+        </label>
         {locked ? (
           <div style={{ padding: '6px 10px', background: '#f1f5f9', borderRadius: 6, display: 'inline-block' }}>
             {formatPeriodLabel(periodMonth)}
@@ -125,8 +181,9 @@ export default function FinancialUploadForm({ clientId, existingSnapshot, onUplo
       ))}
 
       <button className="primary" type="submit" disabled={busy} style={{ marginTop: 8 }}>
-        {busy ? 'Extracting…' : 'Upload & extract'}
+        {busy ? (status ?? 'Working…') : 'Upload & extract'}
       </button>
+      {status && !error && <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>{status}</div>}
       {error && <div className="alert critical" style={{ marginTop: 12 }}>{error}</div>}
     </form>
   );
