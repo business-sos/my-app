@@ -2,6 +2,25 @@ import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase.js';
 
+// Map of line-item field → base-input indicator slug per report type. When
+// extract returns these fields, we also push them into `measurements` so the
+// dashboard's base inputs (and any derived metric depending on them) update
+// immediately — without waiting for the user to click "Run analysis".
+const LINE_ITEM_TO_SLUG = {
+  profit_loss: {
+    revenue: 'revenue',
+    cogs: 'cogs',
+    sales_marketing_expense: 'marketing_spend',
+    net_income: 'net_profit',
+  },
+  // Add balance_sheet / cashflow mappings here when those base inputs exist.
+};
+
+function endOfMonth(periodStart) {
+  const [y, m] = periodStart.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
 const REPORT_LABELS = {
   balance_sheet: 'Balance Sheet',
   profit_loss: 'Profit & Loss',
@@ -32,6 +51,61 @@ async function fileToText(file) {
   return sheets.join('\n\n');
 }
 
+// Fetch base-input indicator IDs by slug (cached for the upload session).
+async function fetchBaseInputIds(slugs) {
+  if (!slugs.length) return new Map();
+  const { data, error } = await supabase
+    .from('indicators')
+    .select('id, slug')
+    .is('client_id', null)
+    .in('slug', slugs);
+  if (error) throw new Error(`fetch indicators: ${error.message}`);
+  return new Map((data ?? []).map(r => [r.slug, r.id]));
+}
+
+// Push P&L (or other report) values into base-input measurements for a period.
+// Returns the slugs that were actually written.
+async function pushBaseInputs({ clientId, periodMonth, reportType, data, indicatorIdBySlug, userId }) {
+  const mapping = LINE_ITEM_TO_SLUG[reportType];
+  if (!mapping) return [];
+
+  const periodEnd = endOfMonth(periodMonth);
+  const writes = [];
+  const slugsWritten = [];
+  for (const [field, slug] of Object.entries(mapping)) {
+    const v = data?.[field];
+    if (v == null || !Number.isFinite(Number(v))) continue;
+    const indId = indicatorIdBySlug.get(slug);
+    if (!indId) continue;
+    writes.push({
+      client_id: clientId,
+      indicator_id: indId,
+      value: Number(v),
+      period_start: periodMonth,
+      period_end: periodEnd,
+      source: 'api',
+      source_ref: `pl-extract:${periodMonth}`,
+      notes: `Auto-pushed from ${reportType} extract`,
+      entered_by: userId,
+    });
+    slugsWritten.push(slug);
+  }
+  if (writes.length === 0) return [];
+
+  // Make sure each base-input indicator is tracked for this client.
+  await supabase
+    .from('tracked_indicators')
+    .upsert(
+      writes.map(w => ({ client_id: w.client_id, indicator_id: w.indicator_id })),
+      { onConflict: 'client_id,indicator_id' }
+    );
+  const { error } = await supabase
+    .from('measurements')
+    .upsert(writes, { onConflict: 'client_id,indicator_id,period_start' });
+  if (error) throw new Error(`measurements upsert: ${error.message}`);
+  return slugsWritten;
+}
+
 export default function FinancialUploadForm({ clientId, existingSnapshot, onUploaded }) {
   const [periodMonth, setPeriodMonth] = useState(existingSnapshot?.period_month ?? lastMonthFirst());
   const [files, setFiles] = useState({ profit_loss: null, balance_sheet: null, cashflow: null });
@@ -42,10 +116,11 @@ export default function FinancialUploadForm({ clientId, existingSnapshot, onUplo
 
   /**
    * For one (file, reportType), call extract → get back periods array,
-   * then for each period create/find a snapshot, attach the file, write line items.
-   * Returns the list of snapshot_ids touched.
+   * then for each period create/find a snapshot, attach the file, write line items,
+   * and push base-input measurements so the dashboard updates immediately.
+   * Returns { snapshotIds, periodsTouched, slugsTouched, userId }.
    */
-  async function processFile(reportType, file, jwt) {
+  async function processFile(reportType, file, jwt, userId, indicatorIdBySlug) {
     setStatus(`Extracting ${REPORT_LABELS[reportType]}…`);
     const text = await fileToText(file);
 
@@ -71,8 +146,10 @@ export default function FinancialUploadForm({ clientId, existingSnapshot, onUplo
         : `Saving ${periods.length} months of ${REPORT_LABELS[reportType]}…`
     );
 
-    // Step 2: per period, create/find snapshot + upload file + write line items
+    // Step 2: per period, create/find snapshot + upload file + write line items + push base inputs
     const touchedSnapshotIds = [];
+    const periodsTouched = new Set();
+    const slugsTouched = new Set();
     for (const period of periods) {
       // Get signed upload URL (also creates/upserts the snapshot row).
       const urlRes = await fetch('/api/financial-upload-url', {
@@ -102,9 +179,20 @@ export default function FinancialUploadForm({ clientId, existingSnapshot, onUplo
         }, { onConflict: 'snapshot_id,report_type' });
       if (liErr) throw new Error(`line-items insert failed: ${liErr.message}`);
 
+      // Push base-input measurements so the dashboard updates immediately.
+      const slugs = await pushBaseInputs({
+        clientId,
+        periodMonth: period.period_month,
+        reportType,
+        data: period.data,
+        indicatorIdBySlug,
+        userId,
+      });
+      slugs.forEach(s => slugsTouched.add(s));
+      periodsTouched.add(period.period_month);
       touchedSnapshotIds.push(snapshot_id);
     }
-    return touchedSnapshotIds;
+    return { snapshotIds: touchedSnapshotIds, periodsTouched, slugsTouched };
   }
 
   async function handleSubmit(e) {
@@ -116,18 +204,46 @@ export default function FinancialUploadForm({ clientId, existingSnapshot, onUplo
       const { data: { session } } = await supabase.auth.getSession();
       const jwt = session?.access_token;
       if (!jwt) throw new Error('Not signed in');
+      const userId = session?.user?.id;
+
+      // Fetch all base-input indicator IDs once for the whole upload session.
+      const allSlugs = [...new Set(
+        Object.values(LINE_ITEM_TO_SLUG).flatMap(m => Object.values(m))
+      )];
+      const indicatorIdBySlug = await fetchBaseInputIds(allSlugs);
 
       let firstSnapshotId = null;
-      let totalSnapshots = new Set();
+      const totalSnapshots = new Set();
+      const allPeriods = new Set();
+      const allSlugsTouched = new Set();
 
       for (const [reportType, file] of Object.entries(files)) {
         if (!file) continue;
-        const ids = await processFile(reportType, file, jwt);
-        if (ids[0] && !firstSnapshotId) firstSnapshotId = ids[0];
-        ids.forEach(id => totalSnapshots.add(id));
+        const result = await processFile(reportType, file, jwt, userId, indicatorIdBySlug);
+        if (result.snapshotIds[0] && !firstSnapshotId) firstSnapshotId = result.snapshotIds[0];
+        result.snapshotIds.forEach(id => totalSnapshots.add(id));
+        result.periodsTouched.forEach(p => allPeriods.add(p));
+        result.slugsTouched.forEach(s => allSlugsTouched.add(s));
       }
 
       if (!firstSnapshotId) throw new Error('Select at least one file');
+
+      // Trigger derivation for every period touched, so CAC / gross margin /
+      // net margin / etc. get computed from the freshly-pushed base inputs.
+      if (allPeriods.size > 0 && allSlugsTouched.size > 0) {
+        setStatus(`Computing derived metrics for ${allPeriods.size} month${allPeriods.size === 1 ? '' : 's'}…`);
+        try {
+          await fetch('/api/derive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+            body: JSON.stringify({
+              client_id: clientId,
+              periods: [...allPeriods],
+              changed_slugs: [...allSlugsTouched],
+            }),
+          });
+        } catch (e) { /* best effort */ }
+      }
 
       setStatus(`Saved ${totalSnapshots.size} month${totalSnapshots.size === 1 ? '' : 's'}.`);
       onUploaded({
