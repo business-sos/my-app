@@ -12,14 +12,17 @@
   --gold: #C9973A;
   --gold-light: #E8B96A;
   --gold-pale: #F5E8C8;
-  --cream: #FAF7F0;
-  --paper: #FBF8F1;
-  --paper-alt: #F4EFE3;
-  --ink: #0F1B1D;
-  --ink-mid: #4A5658;
-  --ink-soft: #7A8284;
-  --border: #D8D2C5;
-  --border-soft: #E8E2D4;
+  /* Surfaces: cooled toward white. Still a hint of warmth (we're a coaching
+     practice, not a Bloomberg terminal) but reads as paper, not parchment. */
+  --cream: #F6F5F2;
+  --paper: #FFFFFF;
+  --paper-alt: #F0EEEA;
+  /* Ink: pushed darker for sharper contrast on data values. */
+  --ink: #0A0F11;
+  --ink-mid: #2E393B;
+  --ink-soft: #6A7374;
+  --border: #CFCBC2;
+  --border-soft: #E4E0D6;
 
   /* Semantic */
   --good: #2F7F4B;
@@ -287,17 +290,20 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 .area-section {
   background: var(--paper);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 14px 14px 8px;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  box-shadow: var(--shadow-sm);
 }
 .area-section-head { padding: 4px 4px 12px; margin-bottom: 6px; border-bottom: 1px solid var(--border-soft); }
 .area-section-head .eyebrow { color: var(--ink-soft); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
 .area-section-head h3 {
+  /* Italic serif is the brand moment — kept against confident sans data
+     for deliberate contrast. */
   margin: 4px 0 0; font-family: 'Cormorant Garamond', serif; font-style: italic;
-  font-size: 18px; font-weight: 500; color: var(--ink); line-height: 1.25;
+  font-size: 18px; font-weight: 500; color: var(--ink-mid); line-height: 1.25;
 }
 .area-list { display: flex; flex-direction: column; }
 .area-list > * + * { border-top: 1px solid var(--border-soft); }
@@ -315,18 +321,20 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 .hero-card {
   background: var(--paper);
   border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  padding: 20px 22px;
+  border-radius: 10px;
+  padding: 22px 24px;
   display: flex; flex-direction: column; gap: 4px; min-width: 0;
   text-decoration: none; color: inherit;
-  transition: border-color 120ms ease, transform 80ms ease;
+  transition: border-color 120ms ease, transform 80ms ease, box-shadow 120ms ease;
+  box-shadow: var(--shadow-sm);
 }
-.hero-card:hover { border-color: var(--border); transform: translateY(-1px); text-decoration: none; }
+.hero-card:hover { border-color: var(--ink-mid); transform: translateY(-1px); box-shadow: var(--shadow-md); text-decoration: none; }
 .hero-card .eyebrow { color: var(--ink-soft); font-size: 10px; letter-spacing: 0.12em; }
 .hero-card .hero-value {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 40px; font-weight: 500; line-height: 1.05; color: var(--ink);
-  letter-spacing: -0.01em; margin-top: 2px;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 44px; font-weight: 700; line-height: 1.02; color: var(--ink);
+  letter-spacing: -0.035em; margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 .hero-card .hero-meta { font-size: 12px; color: var(--ink-soft); display: flex; gap: 10px; align-items: baseline; }
 .hero-card .hero-delta { font-size: 13px; font-weight: 500; }
@@ -497,12 +505,16 @@ tbody tr:hover { background: var(--paper-alt); }
   padding: 2px 0;
 }
 .tile-value {
-  font-family: 'Cormorant Garamond', serif;
+  /* Confident sans + tabular numerals + tight tracking + heavy weight.
+     The data should feel decisive. Serif is reserved for the brand moments
+     (area question subtitles) — see .area-section-head h3 below. */
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 30px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ink);
-  line-height: 1;
-  letter-spacing: -0.01em;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
 }
 .tile-value-row {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
@@ -513,14 +525,18 @@ tbody tr:hover { background: var(--paper-alt); }
   font-weight: 400;
 }
 .tile-value-prev {
+  font-family: 'Outfit', sans-serif;
   font-size: 20px;
-  font-weight: 400;
+  font-weight: 500;
   color: var(--ink-soft);
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
 }
 .tile-delta {
-  font-size: 12.5px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
 }
 .tile-delta-up    { color: var(--good); }
 .tile-delta-down  { color: var(--bad); }
