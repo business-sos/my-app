@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { listAccessibleClients } from '../lib/supabase.js';
+import { listAccessibleClients, supabase } from '../lib/supabase.js';
 import FinancialDashboard from '../components/FinancialDashboard.jsx';
 import FinancialUploadForm from '../components/FinancialUploadForm.jsx';
 import FinancialConfirmExtraction from '../components/FinancialConfirmExtraction.jsx';
@@ -75,7 +75,21 @@ export default function FinancialAnalysis({ profile }) {
           <FinancialUploadForm
             clientId={clientId}
             existingSnapshot={uploadSnapshot}
-            onUploaded={({ snapshot_id }) => { setActiveSnapshotId(snapshot_id); setMode('confirm'); }}
+            onUploaded={async ({ snapshot_id, snapshot_ids }) => {
+              const ids = snapshot_ids ?? [snapshot_id];
+              if (ids.length > 1) {
+                // Multi-period: auto-confirm all snapshots and route back to dashboard.
+                // Skipping the single-snapshot confirm UI for bulk imports — the
+                // user can review individual values from the dashboard cards.
+                await supabase.from('financial_snapshots')
+                  .update({ status: 'confirmed', confirmed_at: new Date().toISOString() })
+                  .in('id', ids);
+                goDashboard();
+              } else {
+                setActiveSnapshotId(snapshot_id);
+                setMode('confirm');
+              }
+            }}
           />
           <button style={{ marginTop: 8 }} onClick={goDashboard}>Cancel</button>
         </>

@@ -158,6 +158,11 @@ export default async function handler(req, res) {
   const concerns = detectConcerns(ratios, history);
 
   // Narrative via Claude
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({
+      error: 'ANTHROPIC_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables → Production, then redeploy.',
+    });
+  }
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const systemPrompt = `You are a business coach reviewing a monthly financial snapshot for a client. You are pragmatic, specific, and opinionated. You reference actual numbers. You flag what the coach should address in the next session. Keep total response under 300 words. Use markdown with short bullet points.`;
 
