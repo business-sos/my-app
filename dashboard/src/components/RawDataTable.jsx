@@ -88,13 +88,14 @@ export default function RawDataTable({ clientId, indicator, measurements, onChan
       {measurements.length === 0 ? (
         <div className="muted">No measurements yet.</div>
       ) : (
+        <div style={{ overflowX: 'auto' }}>
         <table>
           <thead>
             <tr>
               <th>Period</th>
               <th style={{ textAlign: 'right' }}>Value</th>
               <th>Source</th>
-              <th style={{ width: 140 }}></th>
+              <th style={{ width: 160, textAlign: 'right' }}></th>
             </tr>
           </thead>
           <tbody>
@@ -136,6 +137,7 @@ export default function RawDataTable({ clientId, indicator, measurements, onChan
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

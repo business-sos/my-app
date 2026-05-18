@@ -6,6 +6,18 @@ import { formatValue, pctChange, formatDelta } from '../shared/format.js';
 export default function SparklineTrend({ metric }) {
   const series = metric.history ?? [];
   const last = metric.value;
+
+  // Compact empty state: when there's truly no data, render a short tile so
+  // the column doesn't fill with anaemic placeholders the same size as
+  // populated tiles. Visual rhythm matters here.
+  if (last == null && series.length === 0) {
+    return (
+      <TileShell label={metric.label}>
+        <div className="tile-empty">No data yet</div>
+      </TileShell>
+    );
+  }
+
   const prior = series.length >= 2 ? series[series.length - 2] : null;
   const pct = pctChange(last, prior);
   const isUp = pct != null && pct > 0;

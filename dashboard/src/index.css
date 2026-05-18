@@ -123,6 +123,16 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 /* App shell */
 .app-shell { display: grid; grid-template-columns: 240px 1fr; height: 100vh; background: var(--cream); }
 
+/* Below tablet width: stack sidebar as a top strip with horizontal nav.
+   Reads as a normal page on phones / small laptops instead of squeezing the
+   content into the right gutter. */
+@media (max-width: 900px) {
+  .app-shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: 100vh; }
+  .sidebar { padding: 12px 18px; display: flex; align-items: center; gap: 16px; border-right: none; border-bottom: 1px solid var(--teal-deep); }
+  .sidebar h1 { margin: 0; flex-shrink: 0; }
+  .sidebar a { margin-bottom: 0; padding: 6px 10px; }
+}
+
 .sidebar {
   background: var(--teal-dark);
   color: var(--cream);
@@ -420,6 +430,16 @@ tbody tr:hover { background: var(--paper-alt); }
   min-height: 18px;
 }
 .tile-label { color: var(--ink-soft); }
+.tile-empty {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-style: italic;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+}
 .tile-value {
   font-family: 'Cormorant Garamond', serif;
   font-size: 28px;

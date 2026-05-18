@@ -17,7 +17,7 @@
  * @property {string}  id
  * @property {string}  label
  * @property {MetricUnit} unit
- * @property {number}  value
+ * @property {number | null}  value             - null = no data yet (renders as "—" empty state)
  * @property {string}  [currency]
  * @property {number[]} [history]        - chronological, oldest → newest, ≥4 points for sparkline
  * @property {{ value: number, periodLabel?: string }} [target]
