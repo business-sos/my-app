@@ -58,6 +58,11 @@ export default async function handler(req, res) {
     .single();
   if (snapErr || !snap) return res.status(404).json({ error: 'Snapshot not found or inaccessible' });
 
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({
+      error: 'ANTHROPIC_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables → Production, then redeploy.',
+    });
+  }
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   // Build the tool's input schema from the report's expected fields
