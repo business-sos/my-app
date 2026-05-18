@@ -19,7 +19,28 @@ import TileSetupControls from './TileSetupControls.jsx';
  */
 export default function AreaSection({ area, clientId, tracked, measurements, mode = 'manage', onChanged }) {
   // Hide base inputs (is_input_only) from the Dashboard tile grid per spec.
-  const visible = (tracked ?? []).filter(t => !t.indicator?.is_input_only);
+  const filtered = (tracked ?? []).filter(t => !t.indicator?.is_input_only);
+
+  // Dedupe by case-insensitive name. When BGB had a custom indicator like
+  // "Net profit" before the master standard "Net Profit" was backfilled, both
+  // tiles render. Prefer the one with the most measurements (the one the
+  // client has been recording into); break ties by preferring the standard.
+  const byName = new Map();
+  for (const t of filtered) {
+    const key = (t.indicator?.name || '').trim().toLowerCase();
+    if (!key) continue;
+    const meas = (measurements ?? []).reduce(
+      (n, m) => n + (m.indicator_id === t.indicator.id ? 1 : 0),
+      0,
+    );
+    const existing = byName.get(key);
+    if (!existing) { byName.set(key, { t, meas }); continue; }
+    if (meas > existing.meas) { byName.set(key, { t, meas }); continue; }
+    if (meas === existing.meas && t.indicator.is_standard && !existing.t.indicator.is_standard) {
+      byName.set(key, { t, meas });
+    }
+  }
+  const visible = [...byName.values()].map(v => v.t);
 
   return (
     <section className="dash-col">
