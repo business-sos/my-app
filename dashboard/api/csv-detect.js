@@ -170,6 +170,11 @@ export default async function handler(req, res) {
     },
   };
 
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({
+      error: 'ANTHROPIC_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables → Production, then redeploy.',
+    });
+  }
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const systemPrompt = `You map a user-supplied CSV (Google Sheet export) to a fixed catalog of business-health indicators. You return ONLY a tool call.
 

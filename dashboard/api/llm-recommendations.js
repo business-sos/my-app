@@ -68,6 +68,11 @@ export default async function handler(req, res) {
     active_alerts: areaAlerts.map(a => ({ rule: a.rule_code, severity: a.severity, message: a.message })),
   };
 
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({
+      error: 'ANTHROPIC_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables → Production, then redeploy.',
+    });
+  }
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const systemPrompt = `You are a business coach helping small business owners improve their company health. You focus on practical, specific, actionable recommendations — not platitudes. You are opinionated. You reference specific numbers from the data. You keep responses under 250 words.`;

@@ -148,6 +148,11 @@ export default async function handler(req, res) {
     },
   };
 
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({
+      error: 'ANTHROPIC_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables → Production, then redeploy.',
+    });
+  }
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const systemPrompt = `You are a sharp business operator looking at a coaching client's KPI dashboard. You write insights that make the owner say "I need to act on that this week."
