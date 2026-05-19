@@ -40,13 +40,18 @@ export default function ClientHeader({
         <div className="eyebrow" style={{ marginBottom: 4 }}>
           {isCoach ? `Coach view · ${pageLabel ?? 'Client'}` : (pageLabel ?? 'Your business')}
         </div>
-        <h2 style={{ margin: 0, fontSize: 28 }}>{name}</h2>
+        <h2 style={{
+          margin: 0,
+          fontSize: 28,
+          fontFamily: 'Outfit, sans-serif',
+          fontWeight: 700,
+          letterSpacing: '-0.02em',
+        }}>{name}</h2>
         {subtitle && (
           <div className="muted" style={{
-            fontStyle: 'italic',
-            fontFamily: 'Cormorant Garamond, serif',
-            fontSize: 16,
-            marginTop: 2,
+            fontFamily: 'Outfit, sans-serif',
+            fontSize: 14,
+            marginTop: 4,
           }}>
             {subtitle}
           </div>

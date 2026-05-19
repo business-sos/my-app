@@ -113,8 +113,25 @@ function Shell({ profile }) {
     <div className="app-shell">
       <nav className="sidebar">
         <h1><span className="brand-diamond" /> Business Health</h1>
-        <NavLink to="/" end>{isCoach ? 'Clients' : 'Dashboard'}</NavLink>
-        <NavLink to="/entry">Data entry</NavLink>
+        <NavLink to="/" end>
+          <span className="nav-icon" aria-hidden>{isCoach ? '👥' : '📊'}</span>
+          {isCoach ? 'Clients' : 'Dashboard'}
+        </NavLink>
+        <NavLink to="/entry">
+          <span className="nav-icon" aria-hidden>📝</span>
+          Data entry
+        </NavLink>
+        <NavLink to="/financial">
+          <span className="nav-icon" aria-hidden>💰</span>
+          Financial
+        </NavLink>
+        <button
+          className="sidebar-cta"
+          onClick={() => window.location.assign('/financial')}
+          type="button"
+        >
+          <span aria-hidden>+</span> Add new entry
+        </button>
       </nav>
       <main className="main-with-topbar">
         <TopBar profile={profile} />

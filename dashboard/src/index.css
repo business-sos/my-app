@@ -5,35 +5,52 @@
    ==================================================================== */
 
 :root {
-  --teal: #097980;
-  --teal-dark: #0a2a2c;
-  --teal-deep: #053437;
-  --teal-mist: #C8DDDE;
-  --gold: #C9973A;
-  --gold-light: #E8B96A;
-  --gold-pale: #F5E8C8;
-  /* Surfaces: cooled toward white. Still a hint of warmth (we're a coaching
-     practice, not a Bloomberg terminal) but reads as paper, not parchment. */
-  --cream: #F6F5F2;
+  /* New Acme-style palette: deep-indigo sidebar, white surfaces, vibrant accents.
+     The previous teal/gold/paper-cream brand is retired in favor of a modern
+     SaaS dashboard aesthetic. */
+  --teal: #4F46E5;            /* primary action (indigo-600) */
+  --teal-dark: #1E1B4B;       /* sidebar (indigo-950) */
+  --teal-deep: #0F0E2E;       /* sidebar depth */
+  --teal-mist: #E0E7FF;       /* tinted soft (indigo-100) */
+  --gold: #FACC15;            /* accent yellow (yellow-400) */
+  --gold-light: #FDE68A;
+  --gold-pale: #FEF3C7;
+
+  /* Tinted backgrounds for hero icon squares — each card uses a different one. */
+  --tint-yellow: #FEF3C7;
+  --tint-yellow-fg: #B45309;
+  --tint-blue: #DBEAFE;
+  --tint-blue-fg: #1D4ED8;
+  --tint-green: #DCFCE7;
+  --tint-green-fg: #15803D;
+  --tint-purple: #EDE9FE;
+  --tint-purple-fg: #6D28D9;
+  --tint-rose: #FFE4E6;
+  --tint-rose-fg: #BE123C;
+
+  /* Surfaces: clean white app background, white cards. No more cream. */
+  --cream: #F7F8FB;
   --paper: #FFFFFF;
-  --paper-alt: #F0EEEA;
-  /* Ink: pushed darker for sharper contrast on data values. */
-  --ink: #0A0F11;
-  --ink-mid: #2E393B;
-  --ink-soft: #6A7374;
-  --border: #CFCBC2;
-  --border-soft: #E4E0D6;
+  --paper-alt: #F1F3F8;
+
+  --ink: #0B1426;
+  --ink-mid: #344157;
+  --ink-soft: #6B7588;
+  --border: #C5CCDA;
+  --border-soft: #E5E8EF;
 
   /* Semantic */
-  --good: #2F7F4B;
-  --good-bg: #E2EFE6;
-  --bad: #B23A2C;
-  --bad-bg: #F3E0DC;
-  --warn: #B17A1F;
-  --warn-bg: #F5E8C8;
+  --good: #16A34A;
+  --good-bg: #DCFCE7;
+  --bad: #DC2626;
+  --bad-bg: #FEE2E2;
+  --warn: #D97706;
+  --warn-bg: #FEF3C7;
 
-  --shadow-sm: 0 1px 2px rgba(15, 27, 29, 0.06);
-  --shadow-md: 0 4px 14px rgba(15, 27, 29, 0.08);
+  /* Floating-card shadows — more pronounced than the previous paper aesthetic. */
+  --shadow-sm: 0 1px 3px rgba(11, 20, 38, 0.06), 0 1px 2px rgba(11, 20, 38, 0.04);
+  --shadow-md: 0 6px 20px rgba(11, 20, 38, 0.08), 0 2px 6px rgba(11, 20, 38, 0.04);
+  --shadow-lg: 0 12px 32px rgba(11, 20, 38, 0.10), 0 4px 10px rgba(11, 20, 38, 0.06);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -126,14 +143,35 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 /* App shell */
 .app-shell { display: grid; grid-template-columns: 240px 1fr; height: 100vh; background: var(--cream); }
 
+/* Sidebar CTA button (Add new entry) */
+.sidebar-cta {
+  position: absolute;
+  left: 18px; right: 18px; bottom: 22px;
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--teal);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px; font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+  transition: transform 80ms ease, box-shadow 120ms ease;
+}
+.sidebar-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(79, 70, 229, 0.45); }
+
 /* Below tablet width: stack sidebar as a top strip with horizontal nav.
    Reads as a normal page on phones / small laptops instead of squeezing the
    content into the right gutter. */
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: 100vh; }
-  .sidebar { padding: 12px 18px; display: flex; align-items: center; gap: 16px; border-right: none; border-bottom: 1px solid var(--teal-deep); }
-  .sidebar h1 { margin: 0; flex-shrink: 0; }
-  .sidebar a { margin-bottom: 0; padding: 6px 10px; }
+  .sidebar { padding: 12px 18px; display: flex; align-items: center; gap: 16px; border-right: none; border-bottom: 1px solid var(--teal-deep); overflow-x: auto; }
+  .sidebar h1 { margin: 0; flex-shrink: 0; font-size: 16px; }
+  .sidebar h1 .brand-diamond { width: 28px; height: 28px; }
+  .sidebar a { margin-bottom: 0; padding: 8px 12px; flex-shrink: 0; }
+  .sidebar-cta { position: static; left: auto; right: auto; bottom: auto; margin-left: auto; padding: 8px 14px; }
 }
 
 .sidebar {
@@ -145,52 +183,64 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 }
 .sidebar h1 {
   font-family: 'Outfit', sans-serif;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--cream);
-  margin: 0 0 26px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: #ffffff;
+  margin: 0 0 36px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  padding: 8px 6px;
 }
 .brand-diamond {
-  width: 18px; height: 18px;
-  background: var(--gold);
-  transform: rotate(45deg);
+  width: 32px; height: 32px;
+  background: var(--teal);
+  border-radius: 8px;
   position: relative;
   flex-shrink: 0;
+  transform: none;
+  display: flex; align-items: center; justify-content: center;
 }
 .brand-diamond::after {
   content: '';
   position: absolute;
-  inset: 3px;
-  border: 1px solid var(--teal-dark);
+  inset: 8px;
+  background: white;
+  border: none;
+  border-radius: 2px;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
 .sidebar a {
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: rgba(250, 247, 240, 0.7);
-  padding: 9px 12px;
-  border-radius: 4px;
-  margin-bottom: 2px;
-  font-size: 13px;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 11px 14px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  border-left: 2px solid transparent;
-  transition: background 120ms, color 120ms, border-color 120ms;
+  letter-spacing: 0;
+  border-left: none;
+  transition: background 120ms, color 120ms;
+}
+.sidebar .nav-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; font-size: 16px; flex-shrink: 0;
+  opacity: 0.85;
 }
 .sidebar a:hover {
-  background: rgba(245, 232, 200, 0.06);
-  color: var(--cream);
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
   text-decoration: none;
 }
 .sidebar a.active {
-  background: rgba(245, 232, 200, 0.08);
-  color: var(--cream);
-  border-left-color: var(--gold);
+  background: var(--teal);
+  color: #ffffff;
+  border-left: none;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
 }
 
 .main, .main-with-topbar {
@@ -290,8 +340,8 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 .area-section {
   background: var(--paper);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  padding: 14px 14px 8px;
+  border-radius: 14px;
+  padding: 18px 18px 10px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -300,10 +350,9 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 .area-section-head { padding: 4px 4px 12px; margin-bottom: 6px; border-bottom: 1px solid var(--border-soft); }
 .area-section-head .eyebrow { color: var(--ink-soft); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
 .area-section-head h3 {
-  /* Italic serif is the brand moment — kept against confident sans data
-     for deliberate contrast. */
-  margin: 4px 0 0; font-family: 'Cormorant Garamond', serif; font-style: italic;
-  font-size: 18px; font-weight: 500; color: var(--ink-mid); line-height: 1.25;
+  margin: 4px 0 0; font-family: 'Outfit', sans-serif; font-style: normal;
+  font-size: 17px; font-weight: 600; color: var(--ink); line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 .area-list { display: flex; flex-direction: column; }
 .area-list > * + * { border-top: 1px solid var(--border-soft); }
@@ -315,32 +364,57 @@ code { font-family: 'JetBrains Mono', 'Menlo', monospace; font-size: 12px; backg
 .area-section-toggle:hover { color: var(--ink); background: var(--paper-alt); border-radius: 4px; }
 .area-section-empty { padding: 6px 4px 12px; font-size: 12px; }
 
-/* Hero strip: top 3 highest-impact KPIs above the section grid */
-.hero-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
-@media (max-width: 900px) { .hero-strip { grid-template-columns: 1fr; } }
+/* Hero strip: top 4 highest-impact KPIs (or 3, depending on count) */
+.hero-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 22px; }
 .hero-card {
   background: var(--paper);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  padding: 22px 24px;
-  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  border-radius: 14px;
+  padding: 20px 22px;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  min-width: 0;
   text-decoration: none; color: inherit;
-  transition: border-color 120ms ease, transform 80ms ease, box-shadow 120ms ease;
+  transition: transform 80ms ease, box-shadow 120ms ease;
   box-shadow: var(--shadow-sm);
 }
-.hero-card:hover { border-color: var(--ink-mid); transform: translateY(-1px); box-shadow: var(--shadow-md); text-decoration: none; }
-.hero-card .eyebrow { color: var(--ink-soft); font-size: 10px; letter-spacing: 0.12em; }
+.hero-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); text-decoration: none; }
+.hero-card .hero-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .hero-card .hero-value {
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 44px; font-weight: 700; line-height: 1.02; color: var(--ink);
-  letter-spacing: -0.035em; margin-top: 4px;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ink);
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.hero-card .hero-meta { font-size: 12px; color: var(--ink-soft); display: flex; gap: 10px; align-items: baseline; }
-.hero-card .hero-delta { font-size: 13px; font-weight: 500; }
+.hero-card .hero-label {
+  font-size: 13px; color: var(--ink-soft); font-weight: 500;
+  line-height: 1.3;
+}
+.hero-card .hero-meta { margin-top: 8px; display: flex; gap: 10px; align-items: baseline; }
+.hero-card .hero-delta { font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
 .hero-card .hero-delta.up { color: var(--good); }
 .hero-card .hero-delta.down { color: var(--bad); }
 .hero-card .hero-delta.flat { color: var(--ink-soft); }
+.hero-card .hero-delta-suffix { font-size: 12px; color: var(--ink-soft); font-weight: 400; }
+
+/* Colored icon square — flex sibling of the body, sits on the right */
+.hero-icon {
+  flex-shrink: 0;
+  width: 48px; height: 48px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px;
+}
+.hero-icon.tint-yellow { background: var(--tint-yellow); color: var(--tint-yellow-fg); }
+.hero-icon.tint-blue   { background: var(--tint-blue);   color: var(--tint-blue-fg); }
+.hero-icon.tint-green  { background: var(--tint-green);  color: var(--tint-green-fg); }
+.hero-icon.tint-purple { background: var(--tint-purple); color: var(--tint-purple-fg); }
+.hero-icon.tint-rose   { background: var(--tint-rose);   color: var(--tint-rose-fg); }
 
 /* Legacy dash-col aliases — kept so anything that still imports the old class
    doesn't break. Should be removed once nothing references them. */
